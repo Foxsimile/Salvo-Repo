@@ -1,6 +1,17 @@
 #Salvo
 
 #Notes To Self
+
+#SIGN OFF NOTES 10/31/19 9:25am
+# * Must complete testing of Obstacle class integration; must complete integration of Obstacle class into the enemy_AI FOV sight methods
+
+# * Must integrate the Muniton class with the MasterSector class, allowing them to finally act as real objects within the world, rather than requiring specified targets. 
+
+#CURRENT VERSION CHANGES
+# * Integrated the Obstacle class within the structure of the MasterSector class, allowing it to interact with other units and update its information for other units to access.
+# * Began integration of Obstacle class into enemy_AI FOV sight method, requires testing to verify success
+
+
 # * Must resolve the issue regarding improper selection of bounding-points for the obstacle when performing a trigonometric correction
 #of the bounding-box for a unit. The issue being that, in certain cases, the bounding-point of the obstacle, hereon known as the colliding-point
 #(though this is somewhat of a misnomer, as technically the colliding-point would be the infracting bounding-point of the unit's bounding-box in this case)
@@ -22,7 +33,8 @@
 #Enemy AI. The final thorn in its side preventing true playability, as currently the AIs have no functionality other than to serve as particularly imposing
 #obstacles.
 # * (v0_9_6_9ze) A massive success has been realized, as the previously unsatisfactory (and, in my opinion, hacky workaround utilizing try/except
-#blocks has been further avoided - 
+#blocks has been further avoided - utilizing the line-segment-circle-intersection methodology, which requires a square-root calculation, but has been implemented in such a way as to
+#act as a last-resort and, as such, will see far less usage and only find itself called upon in rare circumstances.
 
 #
 #Current Version To-Do:
@@ -167,9 +179,7 @@ class Tank():
         self.chassis_sprite = self.create_sprite('chassis')
         self.turret_sprite = self.create_sprite('turret')
         self.load_munitions()
-        self.raw_unit_id = next(ID_GENERATOR)
-        self.unit_id_time = pygame.time.get_ticks()
-        self.unit_id = self.raw_unit_id[0] + str(self.unit_id_time) + self.raw_unit_id[1]
+        self.unit_id = self.generate_unit_id()
         self.allegiance = allegiance
         self.node_distance = chassis['node_distance']
         self.rotate_chassis()
@@ -183,6 +193,12 @@ class Tank():
         self.master_sector = master_sector
         self.master_sector.create_unit(self.unit_id, self.allegiance, self.unit_type, {'chassis': {'rect': self.rotated_chassis_rect, 'degree_val': self.chassis_degree_val, 'pos': self.chassis_pos, 'bounding_points': self.bounding_points, 'rot_axis': self.rotated_chassis_rect.center, 'unit_spec': 'chassis'}, 'turret': {'rect': self.rotated_turret_rect, 'degree_val': self.degree_val, 'pos': (self.rotated_turret_rect.x, self.rotated_turret_rect.y), 'weapon_bounding_points': self.weapon_bounding_points, 'rot_axis': self.chassis_turret_pos, 'unit_spec': 'turret'}})
 
+
+    def generate_unit_id(self):
+        raw_unit_id = next(ID_GENERATOR)
+        unit_id_time = pygame.time.get_ticks()
+        unit_id = raw_unit_id[0] + str(unit_id_time) + raw_unit_id[1]
+        return unit_id
 
 
     def move_chassis(self): #(chassis_direction, chassis_turn_speed, chassis_degree_val): # 1
@@ -1032,19 +1048,110 @@ class ImpactAnimation():
 
 #-----------------------------------Obstacle Class
 class Obstacle():
-    def __init__(self, obstacle_img, obstacle_pos):
-        self.obstacle_img = obstacle_img
-        self.obstacle_pos = obstacle_pos
+    def __init__(self, obstacle, obs_pos, degree_val, master_sector):
+        self.obs_img = obstacle['img']
+        self.obs_pos = obs_pos
+        self.degree_val = degree_val
+        self.rotate_offset = obstacle['rotate_offset']
+        self.rotated_obs = self.obs_img
+        self.rotated_obs_rect = self.obs_img.get_rect()
+        self.obs_sprite = self.create_sprite()
+        self.bounding_offsets = obstacle['bounding_offsets']
+        self.bounding_points = None
+        self.rotate_obs()
+        self.get_bounding_points()
+        self.previous_degree_val = self.degree_val
+        self.previous_pos = self.obs_pos
+        self.obs_sprite = self.create_sprite()
+        self.obs_mask = None
+        self.allegiance = 'OBSTACLE'
+        self.unit_spec = 'obstacle'
+        self.unit_type = 'obstacle'
+        self.unit_id = self.generate_unit_id()
+        self.master_sector = master_sector
+        self.master_sector.create_unit(self.unit_id, self.allegiance, self.unit_type, {'rect': self.rotated_obs_rect, 'degree_val': self.degree_val, 'pos': self.obs_pos, 'bounding_points': self.bounding_points, 'rot_axis': self.rotated_obs_rect.center, 'unit_spec': self.unit_spec})
+
 
 
     def create_sprite(self):
-        img = self.munition_img
-        rect = self.munition_img.get_rect()
-        mask = pygame.mask.from_surface(self.munition_img)
+        img = self.rotated_obs
+        rect = self.rotated_obs_rect
+        mask = pygame.mask.from_surface(self.obs_img)
 
         obstacle_sprite = gameSprite(img, rect, mask)
 
         return obstacle_sprite
+
+    
+    def generate_unit_id(self):
+        raw_unit_id = next(ID_GENERATOR)
+        unit_id_time = pygame.time.get_ticks()
+        unit_id = raw_unit_id[0] + str(unit_id_time) + raw_unit_id[1]
+        return unit_id
+
+    
+    def rotate_obs(self):
+        obs_img = self.obs_img
+        degree_val = self.degree_val
+        obs_pos = self.obs_pos
+        rotate_offset = self.rotate_offset
+        
+        obs_width, obs_height = obs_img.get_size()
+        obs_original_center = (obs_pos[0] + obs_width / 2, obs_pos[1] + obs_height / 2)
+
+        offset = pygame.math.Vector2(rotate_offset)
+        rotated_obs = pygame.transform.rotozoom(obs_img, -degree_val, 1)
+        rotated_obs_offset = offset.rotate(0.0)
+        rotated_obs_rect = rotated_obs.get_rect(center=obs_original_center + rotated_obs_offset)
+
+        self.rotated_obs = rotated_obs
+        self.rotated_obs_rect = rotated_obs_rect
+        self.degree_val = degree_val
+        self.obs_mask = pygame.mask.from_surface(self.rotated_obs)
+
+    
+    def get_bounding_points(self):
+        rotated_obs = self.rotated_obs
+        rotated_obs_rect = self.rotated_obs_rect
+        degree_val = self.degree_val
+        obs_pos = self.obs_pos
+        obs_img = self.obs_img
+
+        obs_width, obs_height = obs_img.get_size()
+        obs_original_center = rotated_obs_rect.center
+
+        bounding_points = []
+
+        bounding_offsets = self.bounding_offsets
+        for x in range(len(bounding_offsets)):
+            offset = pygame.math.Vector2(bounding_offsets[x][0], bounding_offsets[x][1])
+            rotated_obs = pygame.transform.rotozoom(obs_img, -degree_val, 1)
+            rotated_obs_offset = offset.rotate(degree_val)
+            rotated_obs_rect = rotated_obs.get_rect(center=obs_original_center + rotated_obs_offset)
+            bounding_pos_x = rotated_obs_rect.center
+            bounding_points.append(bounding_pos_x)
+        self.bounding_points = bounding_points
+
+    def update_sprite(self):
+        self.obs_sprite.img = self.rotated_obs
+        self.obs_sprite.rect = self.rotated_obs_rect
+        self.obs_sprite.mask = self.obs_mask
+
+    
+    def draw_self(self):
+        DISPSURF.blit(self.rotated_obs, self.rotated_obs_rect)
+
+    
+    def generate_obs(self):
+        if self.previous_pos != self.obs_pos or self.previous_degree_val != self.degree_val:
+            self.rotate_obs()
+            self.get_bounding_points()
+            self.update_sprite()
+        self.draw_self()
+        
+
+
+
 
 
 #-----------------------------------Sector CLass
@@ -1052,7 +1159,7 @@ class Sector():
     def __init__(self, sector_rect):
         self.sector_rect = sector_rect
         self.sector_id = next(SECTOR_ID)
-        self.unit_dict = {'PLAYER': [], 'ENEMY': [], 'ROGUE': []}
+        self.unit_dict = {'PLAYER': [], 'ENEMY': [], 'ROGUE': [], 'OBSTACLE': []}
         self.unit_list_omni = []
         self.turret_list_omni = []
 
@@ -1149,6 +1256,7 @@ class MasterSector():
 
 
     def cull_unit_omni(self, unit_id, unit_allegiance):
+        #Must redesign to utilize the units reference of sectors, as opposed to checking sector by sector
         for x in range(len(self.sector_keys)):
             key_x = self.sector_keys[x]
             if unit_id in self.sectors[key_x].unit_dict[unit_allegiance]:
@@ -1175,6 +1283,14 @@ class MasterSector():
             for x in range(len(self.turrets[unit_id]['sectors'])):
                 sector_x_id = self.turrets[unit_id]['sectors'][x]
                 self.sectors[sector_x_id].add_turret(unit_id)
+
+        elif unit_type == 'obstacle':
+            self.units[unit_id] = {'unit_id': unit_id, 'allegiance': unit_allegiance, 'unit_type': unit_type, 'sectors': [], 'unit_rect': unit_dict['rect'], 'degree_val': unit_dict['degree_val'], 'pos': unit_dict['pos'], 'bounding_points': unit_dict['bounding_points'], 'bounding_connections': {}, 'rot_axis': unit_dict['rot_axis'], 'unit_spec': unit_dict['unit_spec']}
+            self.units[unit_id]['sectors'] = self.sector_point_collision_omni(unit_dict['rect'])
+            self.units[unit_id]['bounding_connections'] = self.get_unit_bounding_connections(unit_dict['rect'], unit_dict['bounding_points'])
+            for x in range(len(self.units[unit_id]['sectors'])):
+                sector_x_id = self.units[unit_id]['sectors'][x]
+                self.sectors[sector_x_id].add_unit(unit_allegiance, unit_id)
                 
 
 
@@ -1197,6 +1313,16 @@ class MasterSector():
                 if unit_id not in self.sectors[self.turrets[unit_id]['sectors'][x]].turret_list_omni:
                     self.sectors[self.turrets[unit_id]['sectors'][x]].add_turret(unit_id)
             return updated_sectors
+        
+        elif object_type == 'obstacle':
+            updated_sectors = self.sector_point_collision_omni(unit_rect)
+            for x in range(len(self.units[unit_id]['sectors'])):
+                if self.units[unit_id]['sectors'][x] not in updated_sectors:
+                    self.sectors[self.units[unit_id]['sectors'][x]].remove_unit(unit_allegiance, unit_id)
+            for x in range(len(self.units[unit_id]['sectors'])):
+                if unit_id not in self.sectors[self.units[unit_id]['sectors'][x]].unit_dict[unit_allegiance]:
+                    self.sectors[self.units[unit_id]['sectors'][x]].add_unit(unit_allegiance, unit_id)
+            return updated_sectors
 
 
     def update_unit(self, unit_id, unit_allegiance, unit_type, unit_dict):
@@ -1216,6 +1342,15 @@ class MasterSector():
                 self.turrets[unit_id]['weapon_bounding_points'] = unit_dict['turret']['weapon_bounding_points']
                 self.turrets[unit_id]['rot_axis'] = unit_dict['turret']['rot_axis']
                 self.turrets[unit_id]['sectors'] = self.update_sectors_for_unit(unit_id, unit_allegiance, unit_dict['turret']['rect'], 'turret')
+        
+        elif unit_type == 'obstacle':
+            if self.units[unit_id]['degree_val'] != unit_dict['degree_val'] or self.units[unit_id]['rot_axis'] != unit_dict['rot_axis']:
+                self.units[unit_id]['degree_val'] = unit_dict['degree_val']
+                self.units[unit_id]['pos'] = unit_dict['pos']
+                self.units[unit_id]['unit_rect'] = unit_dict['rect']
+                self.units[unit_id]['bounding_points'] = unit_dict['bounding_points']
+                self.units[unit_id]['rot_axis'] = unit_dict['rot_axis']
+                self.units[unit_id]['sectors'] = self.update_sectors_for_unit(unit_id, unit_allegiance, unit_dict['rect'])
 
 
 
@@ -2265,9 +2400,13 @@ class EnemyAI():
         rogue_units_in_sectors = list(set([self.master_sector.sectors[sectors_in_sight[x]].unit_dict['ROGUE'][i] for x in range(len(sectors_in_sight))
                                 for i in range(len(self.master_sector.sectors[sectors_in_sight[x]].unit_dict['ROGUE'])) if self.master_sector.sectors[sectors_in_sight[x]].unit_dict['ROGUE'][i] != self.tank.unit_id]))
         
+        obs_units_in_sectors = list(set([self.master_sector.sectors[sectors_in_sight[x]].unit_dict['OBSTACLE'][i] for x in range(len(sectors_in_sight))
+                                for i in range(len(self.master_sector.sectors[sectors_in_sight[x]].unit_dict['OBSTACLE'])) if self.master_sector.sectors[sectors_in_sight[x]].unit_dict['OBSTACLE'][i] != self.tank.unit_id]))
+
         player_units_fov_rect = [player_units_in_sectors[x] for x in range(len(player_units_in_sectors)) if self.fov_rect.colliderect(self.master_sector.units[player_units_in_sectors[x]]['unit_rect']) == True]
         enemy_units_fov_rect = [enemy_units_in_sectors[x] for x in range(len(enemy_units_in_sectors)) if self.fov_rect.colliderect(self.master_sector.units[enemy_units_in_sectors[x]]['unit_rect']) == True]
         rogue_units_fov_rect = [rogue_units_in_sectors[x] for x in range(len(rogue_units_in_sectors)) if self.fov_rect.colliderect(self.master_sector.units[rogue_units_in_sectors[x]]['unit_rect']) == True]
+        obs_units_fov_rect = [obs_units_in_sectors[x] for x in range(len(obs_units_in_sectors)) if self.fov_rect.colliderect(self.master_sector.units[obs_units_in_sectors[x]]['unit_rect']) == True]
 
         player_units_fov_deltoid = []
         for x in range(len(player_units_fov_rect)):
@@ -2292,6 +2431,14 @@ class EnemyAI():
                 rogue_units_fov_deltoid.append(rogue_units_fov_rect[x])
                 self.fov_unit_stats[rogue_units_fov_rect[x]] = fov_unit_stats
                 self.fov_unit_keys.append(rogue_units_fov_rect[x])
+        
+        obs_units_fov_deltoid = []
+        for x in range(len(obs_units_fov_rect)):
+            fov_unit_stats, unit_sighted = self.check_unit_in_fov(obs_units_fov_rect[x], 'OBSTACLE')
+            if unit_sighted == True:
+                obs_units_fov_deltoid.append(obs_units_fov_rect[x])
+                self.fov_unit_stats[obs_units_fov_rect[x]] = fov_unit_stats
+                self.fov_unit_keys.append(obs_units_fov_rect[x])
 
 
         for x in range(len(player_units_fov_deltoid)):
@@ -2300,6 +2447,8 @@ class EnemyAI():
             self.check_unit_points(enemy_units_fov_deltoid[x])
         for x in range(len(rogue_units_fov_deltoid)):
             self.check_unit_points(rogue_units_fov_deltoid[x])
+        for x in range(len(obs_units_fov_deltoid)):
+            self.check_unit_points(obs_units_fov_deltoid[x])
 
         self.order_sighted_units_dist()
 
@@ -2626,7 +2775,6 @@ def generate_unit_id():
             for i in range(start_b, len(alphabet)):
                 yield [alphabet[x] + alphabet[i], random.choice(phonetic_alpha)]
             start_b = 0
-
         start_a = 0
 
 
@@ -3080,6 +3228,11 @@ def main():
     explosion_large_shockwave_impact = {'impact_animation': explosion_large_shockwave_sheet, 'columns_rows': (5, 6), 'impact_offset': (0, 0), 'animation_type': 'dynamic', 'impact_orientation': 'random', 'impact_degree_variance': 0, 'special_degree_fix': 0}
     explosion_skull_impact = {'impact_animation': explosion_skull_sheet, 'columns_rows': (5, 4), 'impact_offset': (100, 0), 'animation_type': 'dynamic', 'impact_orientation': 'inverse', 'impact_degree_variance': 30, 'special_degree_fix': -90}
 
+    #Obs Images
+    pine_tree_img = pygame.image.load('tree_pine_1.png').convert_alpha()
+
+
+
 
     #Turret Variables
     base_turret = {'img': base_turret_img, 'turret_class': 'base_turret', 'turret_rotation_speed': 3, 'rotate_offset': (44, 0)}
@@ -3110,6 +3263,8 @@ def main():
 
     fortyfour_mm_round = {'img': fortyfour_mm_round_img.convert_alpha(), 'munition_type': 'fortyfour_mm_round', 'munition_move_speed': 44, 'maximum_distance': 1250, 'designation': 'secondary', 'munition_offset': (5, 0), 'degree_variance': 3, 'firing_rate': 50, 'round_capacity': 100, 'maximum_ammo': 2000, 'initial_ammo': 1000, 'reload_time_ms': 1500, 'impact': explosion_mini_impact}
     
+    #Obs Sprite Variables
+    pine_obs = {'img': pine_tree_img, 'rotate_offset': (44, 0), 'bounding_offsets': [(50, -50), (50, 50), (-50, -50), (-50, 50)]}
 
     #PlayerTank variables
     
@@ -3152,7 +3307,7 @@ def main():
 
     #AuxiliaryTank variables
     aux_tanks = []
-    aux_positions = aux_positions = [(500, 300)] #[(200, 450), (625, 350), (800, 450), (500, 300), (75, 100), (575, 75), (925, 75), (900, 575), (60, 500)]
+    aux_positions = [(500, 300)] #[(200, 450), (625, 350), (800, 450), (500, 300), (75, 100), (575, 75), (925, 75), (900, 575), (60, 500)]
     for x in range(len(aux_positions)):
         aux_tank = Tank(enemy_chassis2, enemy_tank_turret2, [standard_shell], {}, aux_positions[x], 'ENEMY', master_sector)
         aux_tanks.append(aux_tank)
@@ -3161,6 +3316,15 @@ def main():
     for x in range(len(aux_tanks)):
         enemy_ai = EnemyAI(aux_tanks[x], master_sector)
         aux_enemies.append(enemy_ai)
+
+    #Obstacle variables
+    obs_omni = []
+    obs_positions = [((100, 300), 0)]
+    for x in range(len(obs_positions)):
+        obs_x = Obstacle(pine_obs, obs_positions[x][0], obs_positions[x][1], master_sector)
+        obs_omni.append(obs_x)
+    
+    
 
     
     weapon_firing = {'primary': False, 'secondary': False, 'tertiary': False}
@@ -3278,6 +3442,15 @@ def main():
         artificial_enemy.operations_management()
         artificial_enemy.tank.generate_tank(DISPSURF)
 
+        for x in range(len(obs_omni)):
+            obs_omni[x].generate_obs()
+            for i in range(len(obs_omni[x].bounding_points)):
+                pygame.draw.circle(DISPSURF, (0, 255, 255), obs_omni[x].bounding_points[i], 3, 0)
+            pygame.draw.aaline(DISPSURF, (255, 0, 0), obs_x.bounding_points[0], obs_x.bounding_points[1], True)
+            pygame.draw.aaline(DISPSURF, (255, 0, 0), obs_x.bounding_points[0], obs_x.bounding_points[2], True)
+            pygame.draw.aaline(DISPSURF, (255, 0, 0), obs_x.bounding_points[1], obs_x.bounding_points[3], True)
+            pygame.draw.aaline(DISPSURF, (255, 0, 0), obs_x.bounding_points[2], obs_x.bounding_points[3], True)
+
 
         #aux_enemies operations management
         for x in range(len(aux_enemies)):
@@ -3376,35 +3549,35 @@ def main():
 
 ##        #ENEMY_1 FOV
 ##
-##        pygame.draw.polygon(DISPSURF, (255, 0, 0), [artificial_enemy.tank.chassis_turret_pos, artificial_enemy.fov_deltoid['a']['pos'], artificial_enemy.fov_deltoid['c']['pos'], artificial_enemy.fov_deltoid['b']['pos'], artificial_enemy.tank.chassis_turret_pos], 1)
-##        pygame.draw.rect(DISPSURF, (0, 255, 255), artificial_enemy.fov_rect, 1)
-##        
-##        if artificial_enemy.fov_unit_stats != False:
-##            for x in range(len(artificial_enemy.fov_unit_keys)):
-##                fov_x = artificial_enemy.fov_unit_stats[artificial_enemy.fov_unit_keys[x]]
-##                if fov_x['center'][1] == True:
-##                    pygame.draw.circle(DISPSURF, (0, 255, 0), fov_x['center'][0], 3, 0)
-##                for i in range(len(fov_x['bounding_points'])):
-##                    if fov_x['bounding_points'][i][1] == True:
-##                        pygame.draw.circle(DISPSURF, (0, 255, 0), fov_x['bounding_points'][i][0], 3, 0)
-##
-##        for x in range(len(aux_enemies)):
-##            if aux_enemies[x].tank.unit_id in artificial_enemy.fov_unit_stats:
-##                pygame.draw.aaline(DISPSURF, (0, 255, 0), artificial_enemy.fov_unit_stats[aux_enemies[x].tank.unit_id]['los_points']['counterclock'], artificial_enemy.fov_unit_stats[aux_enemies[x].tank.unit_id]['los_points']['clockwise'], True)
-##
-##
-##        if playerTank.unit_id in artificial_enemy.currently_sighted['keys']:
-##            red = (255, 0, 0)
-##            cyan = (0, 255, 255)
-##            for x in range(len(['c', 'a', 'b'])):
-##                chosen_pos = ['c', 'a', 'b'][x]
-##                if artificial_enemy.currently_sighted['units'][playerTank.unit_id][chosen_pos][2] == True:
-##                    line_color = cyan
-##                else:
-##                    line_color = red
-##                pygame.draw.circle(DISPSURF, line_color, artificial_enemy.currently_sighted['units'][playerTank.unit_id][chosen_pos][0], 3, 0)
-##                pygame.draw.aaline(DISPSURF, line_color, artificial_enemy.currently_sighted['units'][playerTank.unit_id][chosen_pos][0], artificial_enemy.fov_deltoid['origin']['pos'], True)
-##
+    # pygame.draw.polygon(DISPSURF, (255, 0, 0), [artificial_enemy.tank.chassis_turret_pos, artificial_enemy.fov_deltoid['a']['pos'], artificial_enemy.fov_deltoid['c']['pos'], artificial_enemy.fov_deltoid['b']['pos'], artificial_enemy.tank.chassis_turret_pos], 1)
+    # pygame.draw.rect(DISPSURF, (0, 255, 255), artificial_enemy.fov_rect, 1)
+    
+    # if artificial_enemy.fov_unit_stats != False:
+    #     for x in range(len(artificial_enemy.fov_unit_keys)):
+    #         fov_x = artificial_enemy.fov_unit_stats[artificial_enemy.fov_unit_keys[x]]
+    #         if fov_x['center'][1] == True:
+    #             pygame.draw.circle(DISPSURF, (0, 255, 0), fov_x['center'][0], 3, 0)
+    #         for i in range(len(fov_x['bounding_points'])):
+    #             if fov_x['bounding_points'][i][1] == True:
+    #                 pygame.draw.circle(DISPSURF, (0, 255, 0), fov_x['bounding_points'][i][0], 3, 0)
+
+    # for x in range(len(aux_enemies)):
+    #     if aux_enemies[x].tank.unit_id in artificial_enemy.fov_unit_stats:
+    #         pygame.draw.aaline(DISPSURF, (0, 255, 0), artificial_enemy.fov_unit_stats[aux_enemies[x].tank.unit_id]['los_points']['counterclock'], artificial_enemy.fov_unit_stats[aux_enemies[x].tank.unit_id]['los_points']['clockwise'], True)
+
+
+    # if playerTank.unit_id in artificial_enemy.currently_sighted['keys']:
+    #     red = (255, 0, 0)
+    #     cyan = (0, 255, 255)
+    #     for x in range(len(['c', 'a', 'b'])):
+    #         chosen_pos = ['c', 'a', 'b'][x]
+    #         if artificial_enemy.currently_sighted['units'][playerTank.unit_id][chosen_pos][2] == True:
+    #             line_color = cyan
+    #         else:
+    #             line_color = red
+    #         pygame.draw.circle(DISPSURF, line_color, artificial_enemy.currently_sighted['units'][playerTank.unit_id][chosen_pos][0], 3, 0)
+    #         pygame.draw.aaline(DISPSURF, line_color, artificial_enemy.currently_sighted['units'][playerTank.unit_id][chosen_pos][0], artificial_enemy.fov_deltoid['origin']['pos'], True)
+
 ##
 ##        
 ##        #AUX_ENEMIES FOV
@@ -4264,6 +4437,7 @@ def main():
         pygame.draw.circle(DISPSURF, (255, 100, 50), closest_point, 3, 0)
         for i in range(len(connection_indexes)):
             pygame.draw.aaline(DISPSURF, (0, 255, 0), closest_point, master_sector.units[artificial_enemy.tank.unit_id]['bounding_points'][connection_indexes[i]], True)
+
 
 
 
