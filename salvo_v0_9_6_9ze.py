@@ -1,40 +1,18 @@
-#Salvo
+# Salvo
+# v0_9_6_9ze
 
 #Notes To Self
 
-#SIGN OFF NOTES 10/31/19 9:25am
+#SIGN OFF NOTES 11/03/19 9:35pm
 # * Must complete testing of Obstacle class integration; must complete integration of Obstacle class into the enemy_AI FOV sight methods
 
-# * Must integrate the Muniton class with the MasterSector class, allowing them to finally act as real objects within the world, rather than requiring specified targets. 
+# * Must check integration of the Muniton class with the MasterSector class, allowing them to finally act as real objects within the world, rather than requiring specified targets. 
 
 #CURRENT VERSION CHANGES
-# * Integrated the Obstacle class within the structure of the MasterSector class, allowing it to interact with other units and update its information for other units to access.
-# * Began integration of Obstacle class into enemy_AI FOV sight method, requires testing to verify success
-
-
-# * Must resolve the issue regarding improper selection of bounding-points for the obstacle when performing a trigonometric correction
-#of the bounding-box for a unit. The issue being that, in certain cases, the bounding-point of the obstacle, hereon known as the colliding-point
-#(though this is somewhat of a misnomer, as technically the colliding-point would be the infracting bounding-point of the unit's bounding-box in this case)
-#selects a connection-point appropriately in-line with the specified perametres of the algorithm, which causes the unit to rotate towards the obstacle, as opposed
-#to away from it, resulting in subsequent collisions that themselves must be corrected, leading to a cascase of collisions and corrections that may result in
-#a crash due to the unit reaching a point that results in a zero-division error during the trigonometric calculation.
-#A potential solution would simply be to use the polar angle of the selected connection point, avoiding a complete revision of all previously defined variables.
-#That is to say, if it is determined that such a connection-point is of an undesirable angle and is an inadequate candidate for corrective calculations, bearing
-#an angle of 0 degrees from the obstacle, then the new angle utilized within the trigonometric calculations would become 180, to result in a placement position oriented
-#away from, not to, the obstacle.
-#This can be helped using the newly implemented "polarize_degree" function, which simply returns the opposite degree of a given degree.
-#The most pressing criteria would be the determination of a candidate for reassignment, as the cases that require such a transition are niche, yet fatal nonetheless.
-
-#Version 0_9_6_9zd - 0_9_6_9ze notes
-# * As it's been many iterations since I've last provided an update, now would be the perfect time to do so. The collision-correction system is successful -
-#to a degree (so to speak), as I've utilized a try/except block to catch any ZeroDivision or ValueError exceptions and avoid a complete crash. It's been
-#verified to be reliable in even the most extraneous of cases, and thus I'll deem it acceptable to move on with (though it is in need of a true update
-#in order to achieve legitimate rotation-collision-correction.) This will suffice for now, however, and allow Salvo to proceed to the next step of design:
-#Enemy AI. The final thorn in its side preventing true playability, as currently the AIs have no functionality other than to serve as particularly imposing
-#obstacles.
-# * (v0_9_6_9ze) A massive success has been realized, as the previously unsatisfactory (and, in my opinion, hacky workaround utilizing try/except
-#blocks has been further avoided - utilizing the line-segment-circle-intersection methodology, which requires a square-root calculation, but has been implemented in such a way as to
-#act as a last-resort and, as such, will see far less usage and only find itself called upon in rare circumstances.
+# * Checked the integration of the Obstacle class within the MasterSector class, and all seems well - granted this is suspicious in and of itself, and will be regarded with distrust for the forseeable future.
+# * Integrated the Munition and Impact classes within the MasterSector class, housing them completely within the MasterSector and delegating the responsibility to it, as well. They are now spawned into being
+#within the MasterSector class (well - the Impact class is, the Munition class still requires that final touch) and the Munition class is slated for the damage methodology to be implemented, as it receives the
+#unit_id of the colliding unit prior to its deletion, which it currently ignores. This information is ready for the development of a legitimate health and damage system.
 
 #
 #Current Version To-Do:
@@ -191,7 +169,7 @@ class Tank():
         self.furthest_turret_tip_offset = self.get_turret_furthest_tip_offset()
         self.furthest_turret_tip_pos = None
         self.master_sector = master_sector
-        self.master_sector.create_unit(self.unit_id, self.allegiance, self.unit_type, {'chassis': {'rect': self.rotated_chassis_rect, 'degree_val': self.chassis_degree_val, 'pos': self.chassis_pos, 'bounding_points': self.bounding_points, 'rot_axis': self.rotated_chassis_rect.center, 'unit_spec': 'chassis'}, 'turret': {'rect': self.rotated_turret_rect, 'degree_val': self.degree_val, 'pos': (self.rotated_turret_rect.x, self.rotated_turret_rect.y), 'weapon_bounding_points': self.weapon_bounding_points, 'rot_axis': self.chassis_turret_pos, 'unit_spec': 'turret'}})
+        self.master_sector.create_unit(self.unit_id, self.allegiance, self.unit_type, {'chassis': {'rect': self.rotated_chassis_rect, 'degree_val': self.chassis_degree_val, 'pos': self.chassis_pos, 'bounding_points': self.bounding_points, 'rot_axis': self.rotated_chassis_rect.center, 'unit_spec': 'chassis', 'unit_sprite': self.chassis_sprite}, 'turret': {'rect': self.rotated_turret_rect, 'degree_val': self.degree_val, 'pos': (self.rotated_turret_rect.x, self.rotated_turret_rect.y), 'weapon_bounding_points': self.weapon_bounding_points, 'rot_axis': self.chassis_turret_pos, 'unit_spec': 'turret', 'unit_sprite': self.turret_sprite}})
 
 
     def generate_unit_id(self):
@@ -518,7 +496,7 @@ class Tank():
                         ammo_remaining = self.munitions_ammo_check(weapon)
                         if ammo_remaining == True:
                             if self.weapon_firing[weapon]['reload_required'] == False:
-                                munition = Munition(self.weapon_loadout[weapon]['munition_object'], self.degree_val, self.absolute_turret_tip_pos[weapon], self.unit_id, self.allegiance)
+                                munition = Munition(self.weapon_loadout[weapon]['munition_object'], self.degree_val, self.absolute_turret_tip_pos[weapon], self.unit_id, self.allegiance, self.master_sector)
                                 self.weapon_loadout[weapon]['ammo_loaded'] -= 1
                                 recheck_ammo = self.munitions_ammo_check(weapon)
                                 if self.weapon_firing[weapon]['release_required'] == False:
@@ -669,6 +647,9 @@ class Tank():
             self.turret_sprite.rect = self.rotated_turret_rect
             self.turret_sprite.mask = self.turret_mask
 
+    def update_master_sector(self):
+        self.master_sector.update_unit(self.unit_id, self.allegiance, self.unit_type, {'chassis': {'rect': self.rotated_chassis_rect, 'degree_val': self.chassis_degree_val, 'pos': self.chassis_pos, 'bounding_points': self.bounding_points, 'rot_axis': self.rotated_chassis_rect.center, 'unit_sprite': self.chassis_sprite}, 'turret': {'rect': self.rotated_chassis_rect, 'degree_val': self.chassis_degree_val, 'pos': self.chassis_pos, 'bounding_points': self.bounding_points, 'rot_axis': self.rotated_chassis_rect.center}, 'turret': {'rect': self.rotated_turret_rect, 'degree_val': self.degree_val, 'pos': (self.rotated_turret_rect.x, self.rotated_turret_rect.y), 'weapon_bounding_points': self.weapon_bounding_points, 'rot_axis': self.chassis_turret_pos, 'unit_sprite': self.turret_sprite}})
+
 
     def check_unit_collision(self):
         if self.prior_chassis_pos != self.rotated_chassis_rect.center or self.prior_chassis_degree_val != self.chassis_degree_val:
@@ -689,12 +670,22 @@ class Tank():
                 self.get_weapon_bounding_points()
                 self.update_sprite('chassis')
                 self.update_sprite('turret')
-                self.master_sector.update_unit(self.unit_id, self.allegiance, self.unit_type, {'chassis': {'rect': self.rotated_chassis_rect, 'degree_val': self.chassis_degree_val, 'pos': self.chassis_pos, 'bounding_points': self.bounding_points, 'rot_axis': self.rotated_chassis_rect.center}, 'turret': {'rect': self.rotated_turret_rect, 'degree_val': self.degree_val, 'pos': (self.rotated_turret_rect.x, self.rotated_turret_rect.y), 'weapon_bounding_points': self.weapon_bounding_points, 'rot_axis': self.chassis_turret_pos}})
+                self.update_master_sector()
 
         if self.prior_turret_pos != self.chassis_turret_pos or self.prior_turret_degree_val != self.degree_val:
             degree_change = self.master_sector.reorient_turret_collisions_omni(self.unit_id)
             if degree_change != 0.0:
                 self.degree_val += degree_change
+                self.get_turret_tip_pos()
+                self.previous_degree_val = self.degree_val
+                self.absolute_turret_tip_pos = []
+                for x in range(len(self.weapon_variables)):
+                    weapon_x = self.weapon_variables[x]
+                    self.get_absolute_turret_tip_pos(weapon_x)
+                self.get_turret_center_tip_pos()
+                self.get_weapon_bounding_points()
+                self.update_sprite('turret')
+                self.update_master_sector()
                 
 
             
@@ -743,7 +734,7 @@ class Tank():
         self.update_sprite('chassis')
         self.update_sprite('turret')
 
-        self.master_sector.update_unit(self.unit_id, self.allegiance, self.unit_type, {'chassis': {'rect': self.rotated_chassis_rect, 'degree_val': self.chassis_degree_val, 'pos': self.chassis_pos, 'bounding_points': self.bounding_points, 'rot_axis': self.rotated_chassis_rect.center}, 'turret': {'rect': self.rotated_turret_rect, 'degree_val': self.degree_val, 'pos': (self.rotated_turret_rect.x, self.rotated_turret_rect.y), 'weapon_bounding_points': self.weapon_bounding_points, 'rot_axis': self.chassis_turret_pos}})
+        self.update_master_sector()
         self.check_unit_collision()
         DISPSURF.blit(self.rotated_chassis, self.rotated_chassis_rect)######
         DISPSURF.blit(self.rotated_turret, self.rotated_turret_rect)
@@ -755,13 +746,16 @@ class Tank():
         #{'img': standard_shell_img, 'munition_move_speed': 21, 'maximum_distance': 2000, 'designation': 'primary', 'munition_offset': (10, 0)}
 
 class Munition():
-    def __init__(self, munition, munition_degree_val, munition_pos, unit_id, allegiance):
+    def __init__(self, munition, munition_degree_val, munition_pos, unit_id, allegiance, master_sector):
 
         #WILL NEED TO MAKE SEPARATE DICTS/LISTS IN SIMILAR FASHION TO TANK TO AVOID
         #ISSUES WITH DICT OR LIST REFERENCES ALTERING INTENDED EFFECTS IN UNFORSEEABLE
         #YET HILARIOUS WAYS
+
+        #print('mun{}, deg{}, pos{}, id{}, alleg{}'.format(munition, munition_degree_val, munition_pos, unit_id, allegiance))
         
         self.munition_img = munition['img']
+        self.munition_type = munition['munition_type']
         self.munition_move_speed = munition['munition_move_speed']
         self.degree_variance = munition['degree_variance']
         self.munition_degree_val = munition_degree_val
@@ -784,8 +778,19 @@ class Munition():
         self.apply_degree_variance()
         self.impact_degree_val = munition_degree_val
         self.unit_id = unit_id
+        self.munition_id = self.generate_munition_id()
         self.allegiance = allegiance
+        self.get_munition_center()
+        self.rotate_munition()
+        self.master_sector = master_sector
+        self.master_sector.create_munition(self.munition_id, self.unit_id, self.allegiance, self.munition_type, {'rect': self.rotated_munition_rect, 'degree_val': self.munition_degree_val, 'pos': self.munition_pos, 'rot_axis': self.rotated_munition_rect.center, 'unit_sprite': self.munition_sprite})
+       
 
+    def generate_munition_id(self):
+        raw_unit_id = next(ID_GENERATOR)
+        unit_id_time = pygame.time.get_ticks()
+        unit_id = raw_unit_id[0] + str(unit_id_time) + raw_unit_id[1]
+        return unit_id
 
 
     def rotate_munition(self):
@@ -922,11 +927,27 @@ class Munition():
     def impact_initiation(self):
         self.collision_check = True
         self.generate_impact_orientation()
-        impact_object = ImpactAnimation(self.impact_variables['impact_animation'], self.impact_variables['columns_rows'], self.impact_variables['impact_offset'], self.previous_munition_pos, self.impact_degree_val)
+        impact_object = ImpactAnimation(self.impact_variables['impact_animation'], self.impact_variables['columns_rows'], self.impact_variables['impact_offset'], self.previous_munition_pos, self.impact_degree_val, self.munition_id, self.master_sector)
 
         return impact_object
-        
 
+    
+    def update_master_sector(self):
+        self.master_sector.update_munition(self.munition_id, self.unit_id, self.allegiance, self.munition_type, {'rect': self.rotated_munition_rect, 'degree_val': self.munition_degree_val, 'pos': self.munition_pos, 'rot_axis': self.rotated_munition_rect.center, 'unit_sprite': self.munition_sprite})        
+
+
+    def check_munition_collision(self):
+        colliding_unit = self.master_sector.check_munition_sprite_collision(self.munition_id)
+        if colliding_unit != None:
+            impact_object = self.impact_initiation()
+            self.master_sector.impact_objects.append(impact_object)
+            self.master_sector.cull_munition(self.allegiance, self.munition_id)
+
+
+    
+    def check_munition_distance(self):
+        if self.exceeded_distance == True:
+            self.master_sector.cull_munition(self.allegiance, self.munition_id)
 
 
     def generate_munition(self):
@@ -934,17 +955,16 @@ class Munition():
         self.get_munition_center()
         self.rotate_munition()
         self.get_munition_circle_pos()
-
+        self.update_master_sector()
         self.update_sprite()
+        
         
 
         DISPSURF.blit(self.rotated_munition, self.rotated_munition_rect)
-        #munition_rect_display = pygame.draw.rect(DISPSURF, (255, 0, 0), self.rotated_munition_rect, 1)
-        #munition_origin_circ = pygame.draw.circle(DISPSURF, (0, 0, 255), self.munition_origin_pos, 3, 0)
-        #munition_center_circ = pygame.draw.circle(DISPSURF, (0, 255, 0), self.rotated_munition_center, 3, 0)
-        #munition_absolute_circ = pygame.draw.circle(DISPSURF, (0, 255, 0), self.absolute_munition_pos, 3, 0)
 
         self.move_munition()
+        self.check_munition_collision()
+        self.check_munition_distance()
         
 
 #-------------------GameSprite Class
@@ -992,7 +1012,9 @@ class gameSpriteSheet():
 
 #------------------------ImpactAnimation Class
 class ImpactAnimation():
-    def __init__(self, spritesheet, columns_rows, impact_offset, impact_pos, degree_val):
+    def __init__(self, spritesheet, columns_rows, impact_offset, impact_pos, degree_val, impact_id, master_sector):
+        self.impact_id = impact_id
+        self.master_sector = master_sector
         self.spritesheet = spritesheet
         self.columns = columns_rows[0]
         self.rows = columns_rows[1]
@@ -1008,12 +1030,17 @@ class ImpactAnimation():
         self.animation_complete = False
         self.rotated_sprite = None
         self.rotated_sprite_rect = None
+        self.get_current_sprite(initializing=True)
+        self.rotate_sprite()
+        self.master_sector.create_impact(self.impact_id, {'rect': self.rotated_sprite_rect, 'degree_val': self.degree_val, 'pos': self.impact_pos, 'rot_axis': self.rotated_sprite_rect.center, 'unit_sprite': self.current_sprite})
+        
 
 
-    def get_current_sprite(self):
+    def get_current_sprite(self, initializing=False):
         if self.animation_complete == False:
             self.current_sprite = self.spritesheet_object.create_image(self.sheet_index, 0)
-            self.tick_counter += 1
+            if initializing == False:
+                self.tick_counter += 1
             if self.tick_counter == self.tick_maximum:
                 if self.sheet_index < self.max_index:
                     self.sheet_index += 1
@@ -1037,10 +1064,21 @@ class ImpactAnimation():
         self.rotated_sprite = rotated_image
         self.rotated_sprite_rect = rotated_image_rect
 
+    
+    def update_master_sector(self):
+        self.master_sector.update_impact(self.impact_id, {'rect': self.rotated_sprite_rect, 'degree_val': self.degree_val, 'pos': self.impact_pos, 'rot_axis': self.rotated_sprite_rect.center, 'unit_sprite': self.current_sprite})
+
+
+    def check_animation_status(self):
+        if self.animation_complete == True:
+            self.master_sector.cull_impact(self.impact_id)
+
 
     def generate_impact(self):
         self.get_current_sprite()
         self.rotate_sprite()
+        self.update_master_sector()
+        self.check_animation_status()
         DISPSURF.blit(self.rotated_sprite, self.rotated_sprite_rect)
 
 
@@ -1062,14 +1100,14 @@ class Obstacle():
         self.get_bounding_points()
         self.previous_degree_val = self.degree_val
         self.previous_pos = self.obs_pos
-        self.obs_sprite = self.create_sprite()
         self.obs_mask = None
+        self.obs_sprite = self.create_sprite()
         self.allegiance = 'OBSTACLE'
         self.unit_spec = 'obstacle'
         self.unit_type = 'obstacle'
         self.unit_id = self.generate_unit_id()
         self.master_sector = master_sector
-        self.master_sector.create_unit(self.unit_id, self.allegiance, self.unit_type, {'rect': self.rotated_obs_rect, 'degree_val': self.degree_val, 'pos': self.obs_pos, 'bounding_points': self.bounding_points, 'rot_axis': self.rotated_obs_rect.center, 'unit_spec': self.unit_spec})
+        self.master_sector.create_unit(self.unit_id, self.allegiance, self.unit_type, {'rect': self.rotated_obs_rect, 'degree_val': self.degree_val, 'pos': self.obs_pos, 'bounding_points': self.bounding_points, 'rot_axis': self.rotated_obs_rect.center, 'unit_spec': self.unit_spec, 'unit_sprite': self.obs_sprite})
 
 
 
@@ -1162,6 +1200,9 @@ class Sector():
         self.unit_dict = {'PLAYER': [], 'ENEMY': [], 'ROGUE': [], 'OBSTACLE': []}
         self.unit_list_omni = []
         self.turret_list_omni = []
+        self.munition_dict = {'PLAYER': [], 'ENEMY': [], 'ROGUE': []}
+        self.munition_list_omni = []
+        self.impact_list_omni = []
 
 
     def check_if_contained(self, unit_rect):
@@ -1189,6 +1230,28 @@ class Sector():
         if unit_id in self.turret_list_omni:
             self.turret_list_omni.remove(unit_id)
 
+    
+    def add_munition(self, unit_allegiance, munition_id):
+        if munition_id not in self.munition_list_omni:
+            self.munition_list_omni.append(munition_id)
+            self.munition_dict[unit_allegiance].append(munition_id)
+
+    
+    def remove_munition(self, unit_allegiance, munition_id):
+        if munition_id in self.munition_list_omni:
+            self.munition_list_omni.remove(munition_id)
+            self.munition_dict[unit_allegiance].remove(munition_id)
+    
+
+    def add_impact(self, impact_id):
+        if impact_id not in self.impact_list_omni:
+            self.impact_list_omni.append(impact_id)
+    
+
+    def remove_impact(self, impact_id):
+        if impact_id in self.impact_list_omni:
+            self.impact_list_omni.remove(impact_id)
+
 
     def draw_self(self, DISPSURF):
         pygame.draw.rect(DISPSURF, (0, 0, 0), self.sector_rect, 1)
@@ -1204,6 +1267,10 @@ class MasterSector():
         self.sector_keys = self.get_sector_keys()
         self.units = {}
         self.turrets = {}
+        self.munitions = {}
+        self.munition_objects = []
+        self.impacts = {}
+        self.impact_objects = []
 
 
 
@@ -1261,17 +1328,18 @@ class MasterSector():
             key_x = self.sector_keys[x]
             if unit_id in self.sectors[key_x].unit_dict[unit_allegiance]:
                 self.sectors[key_x].unit_dict[unit_allegiance].remove(unit_id)
+                self.sectors[key_x].unit_list_omni.remove(unit_id)
 
 
     def create_unit(self, unit_id, unit_allegiance, unit_type, unit_dict):
         if unit_type == 'tank':
-            self.units[unit_id] = {'unit_id': unit_id, 'allegiance': unit_allegiance, 'unit_type': unit_type, 'sectors': [], 'unit_rect': unit_dict['chassis']['rect'], 'degree_val': unit_dict['chassis']['degree_val'], 'pos': unit_dict['chassis']['pos'], 'bounding_points': unit_dict['chassis']['bounding_points'], 'bounding_connections': {}, 'rot_axis': unit_dict['chassis']['rot_axis'], 'unit_spec': unit_dict['chassis']['unit_spec']}
+            self.units[unit_id] = {'unit_id': unit_id, 'allegiance': unit_allegiance, 'unit_type': unit_type, 'sectors': [], 'unit_rect': unit_dict['chassis']['rect'], 'degree_val': unit_dict['chassis']['degree_val'], 'pos': unit_dict['chassis']['pos'], 'bounding_points': unit_dict['chassis']['bounding_points'], 'bounding_connections': {}, 'rot_axis': unit_dict['chassis']['rot_axis'], 'unit_spec': unit_dict['chassis']['unit_spec'], 'unit_sprite': unit_dict['chassis']['unit_sprite']}
             self.units[unit_id]['sectors'] = self.sector_point_collision_omni(unit_dict['chassis']['rect'])
             self.units[unit_id]['bounding_connections'] = self.get_unit_bounding_connections(unit_dict['chassis']['rect'], unit_dict['chassis']['bounding_points'])
             for x in range(len(self.units[unit_id]['sectors'])):
                 sector_x_id = self.units[unit_id]['sectors'][x]
                 self.sectors[sector_x_id].add_unit(unit_allegiance, unit_id)
-            self.turrets[unit_id] = {'unit_id': unit_id, 'allegiance': unit_allegiance, 'unit_type': unit_type, 'sectors': [], 'unit_rect': unit_dict['turret']['rect'], 'degree_val': unit_dict['turret']['degree_val'], 'pos': unit_dict['turret']['pos'], 'weapon_bounding_points': unit_dict['turret']['weapon_bounding_points'], 'weapon_bounding_connections': {}, 'rot_axis': unit_dict['turret']['rot_axis'], 'unit_spec': unit_dict['turret']['unit_spec']}
+            self.turrets[unit_id] = {'unit_id': unit_id, 'allegiance': unit_allegiance, 'unit_type': unit_type, 'sectors': [], 'unit_rect': unit_dict['turret']['rect'], 'degree_val': unit_dict['turret']['degree_val'], 'pos': unit_dict['turret']['pos'], 'weapon_bounding_points': unit_dict['turret']['weapon_bounding_points'], 'weapon_bounding_connections': {}, 'rot_axis': unit_dict['turret']['rot_axis'], 'unit_spec': unit_dict['turret']['unit_spec'], 'unit_sprite': unit_dict['turret']['unit_sprite']}
             self.turrets[unit_id]['sectors'] = self.sector_point_collision_omni(unit_dict['turret']['rect'])
             turret_bounding_connections = []
             for x in range(len(unit_dict['turret']['weapon_bounding_points'])):
@@ -1285,33 +1353,105 @@ class MasterSector():
                 self.sectors[sector_x_id].add_turret(unit_id)
 
         elif unit_type == 'obstacle':
-            self.units[unit_id] = {'unit_id': unit_id, 'allegiance': unit_allegiance, 'unit_type': unit_type, 'sectors': [], 'unit_rect': unit_dict['rect'], 'degree_val': unit_dict['degree_val'], 'pos': unit_dict['pos'], 'bounding_points': unit_dict['bounding_points'], 'bounding_connections': {}, 'rot_axis': unit_dict['rot_axis'], 'unit_spec': unit_dict['unit_spec']}
+            self.units[unit_id] = {'unit_id': unit_id, 'allegiance': unit_allegiance, 'unit_type': unit_type, 'sectors': [], 'unit_rect': unit_dict['rect'], 'degree_val': unit_dict['degree_val'], 'pos': unit_dict['pos'], 'bounding_points': unit_dict['bounding_points'], 'bounding_connections': {}, 'rot_axis': unit_dict['rot_axis'], 'unit_spec': unit_dict['unit_spec'], 'unit_sprite': unit_dict['unit_sprite']}
             self.units[unit_id]['sectors'] = self.sector_point_collision_omni(unit_dict['rect'])
             self.units[unit_id]['bounding_connections'] = self.get_unit_bounding_connections(unit_dict['rect'], unit_dict['bounding_points'])
             for x in range(len(self.units[unit_id]['sectors'])):
                 sector_x_id = self.units[unit_id]['sectors'][x]
                 self.sectors[sector_x_id].add_unit(unit_allegiance, unit_id)
-                
+
+    
+    def create_impact(self, impact_id, impact_dict):
+        self.impacts[impact_id] = {'impact_id': impact_id, 'sectors': [], 'unit_rect': impact_dict['rect'], 'degree_val': impact_dict['degree_val'], 'pos': impact_dict['pos'], 'rot_axis': impact_dict['rot_axis'], 'unit_sprite': impact_dict['unit_sprite']}
+        self.impacts[impact_id]['sectors'] = self.sector_point_collision_omni(impact_dict['rect'])
+        for x in range(len(self.impacts[impact_id]['sectors'])):
+            sector_x_id = self.impacts[impact_id]['sectors'][x]
+            self.sectors[sector_x_id].add_impact(impact_id)
+
+
+    def update_sectors_for_impact(self, impact_id, unit_rect):
+        updated_sectors = self.sector_point_collision_omni(unit_rect)
+        for x in range(len(self.impacts[impact_id]['sectors'])):
+            if self.impacts[impact_id]['sectors'][x] not in updated_sectors:
+                self.sectors[self.impacts[impact_id]['sectors'][x]].remove_impact(impact_id)
+        for x in range(len(updated_sectors)):
+            if impact_id not in self.sectors[updated_sectors[x]].impact_list_omni:
+                self.sectors[updated_sectors[x]].add_impact(impact_id)
+        return updated_sectors
+
+
+    
+    def create_munition(self, munition_id, unit_id, unit_allegiance, munition_type, munition_dict):
+        self.munitions[munition_id] = {'munition_id': munition_id, 'unit_id': unit_id, 'allegiance': unit_allegiance, 'munition_type': munition_type, 'sectors': [], 'unit_rect': munition_dict['rect'], 'degree_val': munition_dict['degree_val'], 'pos': munition_dict['pos'], 'rot_axis': munition_dict['rot_axis'], 'unit_sprite': munition_dict['unit_sprite']}
+        self.munitions[munition_id]['sectors'] = self.sector_point_collision_omni(munition_dict['rect'])
+        for x in range(len(self.munitions[munition_id]['sectors'])):
+            sector_x_id = self.munitions[munition_id]['sectors'][x]
+            self.sectors[sector_x_id].add_munition(unit_allegiance, munition_id)
+
+
+    def update_sectors_for_munition(self, munition_id, unit_allegiance, unit_rect):
+        updated_sectors = self.sector_point_collision_omni(unit_rect)
+        for x in range(len(self.munitions[munition_id]['sectors'])):
+            if self.munitions[munition_id]['sectors'][x] not in updated_sectors:
+                self.sectors[self.munitions[munition_id]['sectors'][x]].remove_munition(unit_allegiance, munition_id)
+        for x in range(len(updated_sectors)):
+            if munition_id not in self.sectors[updated_sectors[x]].munition_list_omni:
+                self.sectors[updated_sectors[x]].add_munition(unit_allegiance, munition_id)
+        return updated_sectors
+
+
+    def check_munition_sprite_collision(self, munition_id):
+        for x in range(len(self.munitions[munition_id]['sectors'])):
+            sector_x = self.munitions[munition_id]['sectors'][x]
+            for i in range(len(self.sectors[sector_x].unit_list_omni)):
+                unit_i = self.sectors[sector_x].unit_list_omni[i]
+                if self.munitions[munition_id]['unit_id'] != unit_i:
+                    if self.munitions[munition_id]['unit_rect'].colliderect(self.units[unit_i]['unit_rect']):
+                        mask_collision = pygame.sprite.collide_mask(self.munitions[munition_id]['unit_sprite'], self.units[unit_i]['unit_sprite'])
+                        if mask_collision != None:
+                            return unit_i
+
+    
+    def cull_munition(self, unit_allegiance, munition_id):
+        for x in range(len(self.munitions[munition_id]['sectors'])):
+            self.sectors[self.munitions[munition_id]['sectors'][x]].remove_munition(unit_allegiance, munition_id)
+        del self.munitions[munition_id]
+        for x in range(len(self.munition_objects)):
+            if self.munition_objects[x].munition_id == munition_id:
+                del self.munition_objects[x]
+                break
+
+    
+    def cull_impact(self, impact_id):
+        for x in range(len(self.impacts[impact_id]['sectors'])):
+            self.sectors[self.impacts[impact_id]['sectors'][x]].remove_impact(impact_id)
+        del self.impacts[impact_id]
+        for x in range(len(self.impact_objects)):
+            if self.impact_objects[x].impact_id == impact_id:
+                del self.impact_objects[x]
+                break
+    
 
 
     def update_sectors_for_unit(self, unit_id, unit_allegiance, unit_rect, object_type='tank'):
         if object_type == 'tank':
             updated_sectors = self.sector_point_collision_omni(unit_rect)
+
             for x in range(len(self.units[unit_id]['sectors'])):
                 if self.units[unit_id]['sectors'][x] not in updated_sectors:
                     self.sectors[self.units[unit_id]['sectors'][x]].remove_unit(unit_allegiance, unit_id)
-            for x in range(len(self.units[unit_id]['sectors'])):
-                if unit_id not in self.sectors[self.units[unit_id]['sectors'][x]].unit_dict[unit_allegiance]:
-                    self.sectors[self.units[unit_id]['sectors'][x]].add_unit(unit_allegiance, unit_id)
+            for x in range(len(updated_sectors)):
+                if unit_id not in self.sectors[updated_sectors[x]].unit_dict[unit_allegiance]:
+                    self.sectors[updated_sectors[x]].add_unit(unit_allegiance, unit_id)
             return updated_sectors
         elif object_type == 'turret':
             updated_sectors = self.sector_point_collision_omni(unit_rect)
             for x in range(len(self.turrets[unit_id]['sectors'])):
                 if self.turrets[unit_id]['sectors'][x] not in updated_sectors:
                     self.sectors[self.turrets[unit_id]['sectors'][x]].remove_turret(unit_id)
-            for x in range(len(self.turrets[unit_id]['sectors'])):
-                if unit_id not in self.sectors[self.turrets[unit_id]['sectors'][x]].turret_list_omni:
-                    self.sectors[self.turrets[unit_id]['sectors'][x]].add_turret(unit_id)
+            for x in range(len(updated_sectors)):
+                if unit_id not in self.sectors[updated_sectors[x]].turret_list_omni:
+                    self.sectors[updated_sectors[x]].add_turret(unit_id)
             return updated_sectors
         
         elif object_type == 'obstacle':
@@ -1319,10 +1459,30 @@ class MasterSector():
             for x in range(len(self.units[unit_id]['sectors'])):
                 if self.units[unit_id]['sectors'][x] not in updated_sectors:
                     self.sectors[self.units[unit_id]['sectors'][x]].remove_unit(unit_allegiance, unit_id)
-            for x in range(len(self.units[unit_id]['sectors'])):
-                if unit_id not in self.sectors[self.units[unit_id]['sectors'][x]].unit_dict[unit_allegiance]:
-                    self.sectors[self.units[unit_id]['sectors'][x]].add_unit(unit_allegiance, unit_id)
+            for x in range(len(updated_sectors)):
+                if unit_id not in self.sectors[updated_sectors[x]].unit_dict[unit_allegiance]:
+                    self.sectors[updated_sectors[x]].add_unit(unit_allegiance, unit_id)
             return updated_sectors
+
+    
+    def update_impact(self, impact_id, impact_dict):
+        if self.impacts[impact_id]['degree_val'] != impact_dict['degree_val'] or self.impacts[impact_id]['rot_axis'] != impact_dict['rot_axis'] or self.impacts[impact_id]['unit_sprite'] != impact_dict['unit_sprite']:
+            self.impacts[impact_id]['degree_val'] = impact_dict['degree_val']
+            self.impacts[impact_id]['pos'] = impact_dict['pos']
+            self.impacts[impact_id]['unit_rect'] = impact_dict['rect']
+            self.impacts[impact_id]['rot_axis'] = impact_dict['rot_axis']
+            self.impacts[impact_id]['unit_sprite'] = impact_dict['unit_sprite']
+            self.impacts[impact_id]['sectors'] = self.update_sectors_for_impact(impact_id, impact_dict['rect'])
+
+    
+    def update_munition(self, munition_id, unit_id, unit_allegiance, munition_type, munition_dict):
+        if self.munitions[munition_id]['degree_val'] != munition_dict['degree_val'] or self.munitions[munition_id]['rot_axis'] != munition_dict['rot_axis']:
+            self.munitions[munition_id]['degree_val'] = munition_dict['degree_val']
+            self.munitions[munition_id]['pos'] = munition_dict['pos']
+            self.munitions[munition_id]['unit_rect'] = munition_dict['rect']
+            self.munitions[munition_id]['rot_axis'] = munition_dict['rot_axis']
+            self.munitions[munition_id]['unit_sprite'] = munition_dict['unit_sprite']
+            self.munitions[munition_id]['sectors'] = self.update_sectors_for_munition(munition_id, unit_allegiance, munition_dict['rect'])
 
 
     def update_unit(self, unit_id, unit_allegiance, unit_type, unit_dict):
@@ -1333,6 +1493,7 @@ class MasterSector():
                 self.units[unit_id]['unit_rect'] = unit_dict['chassis']['rect']
                 self.units[unit_id]['bounding_points'] = unit_dict['chassis']['bounding_points']
                 self.units[unit_id]['rot_axis'] = unit_dict['chassis']['rot_axis']
+                self.units[unit_id]['unit_sprite'] = unit_dict['chassis']['unit_sprite']
                 self.units[unit_id]['sectors'] = self.update_sectors_for_unit(unit_id, unit_allegiance, unit_dict['chassis']['rect'])
 
             if self.turrets[unit_id]['degree_val'] != unit_dict['turret']['degree_val'] or self.turrets[unit_id]['pos'] != unit_dict['turret']['pos']:
@@ -1341,6 +1502,7 @@ class MasterSector():
                 self.turrets[unit_id]['unit_rect'] = unit_dict['turret']['rect']
                 self.turrets[unit_id]['weapon_bounding_points'] = unit_dict['turret']['weapon_bounding_points']
                 self.turrets[unit_id]['rot_axis'] = unit_dict['turret']['rot_axis']
+                self.turrets[unit_id]['unit_sprite'] = unit_dict['turret']['unit_sprite']
                 self.turrets[unit_id]['sectors'] = self.update_sectors_for_unit(unit_id, unit_allegiance, unit_dict['turret']['rect'], 'turret')
         
         elif unit_type == 'obstacle':
@@ -1350,6 +1512,7 @@ class MasterSector():
                 self.units[unit_id]['unit_rect'] = unit_dict['rect']
                 self.units[unit_id]['bounding_points'] = unit_dict['bounding_points']
                 self.units[unit_id]['rot_axis'] = unit_dict['rot_axis']
+                self.units[unit_id]['unit_sprite'] = unit_dict['unit_sprite']
                 self.units[unit_id]['sectors'] = self.update_sectors_for_unit(unit_id, unit_allegiance, unit_dict['rect'])
 
 
@@ -1394,6 +1557,28 @@ class MasterSector():
                     sectors_occupied.append(self.sectors_point_dict[sector_point])
 
         return sectors_occupied
+
+
+    def generate_munitions(self):
+        '''
+        Generates the various munition objects housed within the MasterSector munition_objects attribute.
+        '''
+        generated_munitions_list = [self.munition_objects[x] for x in range(len(self.munition_objects))]
+        for x in range(len(generated_munitions_list)):
+            munition_x = generated_munitions_list[x]
+            munition_x.generate_munition()
+        generated_munitions_list = None
+
+    
+    def generate_impacts(self):
+        '''
+        Generates the various impact objects housed within the MasterSector impact_objects attribute.
+        '''
+        generated_impacts_list = [self.impact_objects[x] for x in range(len(self.impact_objects))]
+        for x in range(len(generated_impacts_list)):
+            impact_x = generated_impacts_list[x]
+            impact_x.generate_impact()
+        generated_impacts_list = None
 
 
     def get_unit_bounding_connections(self, unit_rect, unit_bounding_points):
@@ -3421,7 +3606,7 @@ def main():
         munitions_spawned = playerTank.weapons_firing_initiate()
         if len(munitions_spawned) > 0:
             for x in range(len(munitions_spawned)):
-                munition_objects.append(munitions_spawned[x])
+                master_sector.munition_objects.append(munitions_spawned[x])
                 rounds_fired += 1
                 
                     
@@ -3433,8 +3618,6 @@ def main():
         for x in range(len(obstacle_list)):
             pygame.draw.rect(DISPSURF, (0, 0, 0), obstacle_list[x])
 
-        munition_objects_culling = []
-        impact_objects_culling = []
 
         
         playerTank.generate_tank(DISPSURF)
@@ -3456,54 +3639,14 @@ def main():
         for x in range(len(aux_enemies)):
             aux_enemies[x].operations_management()
             aux_enemies[x].tank.generate_tank(DISPSURF)
+
+        master_sector.generate_munitions()
+        master_sector.generate_impacts()
         
         pygame.draw.circle(DISPSURF, (255, 0, 0), enemyTank.rotated_chassis_rect.center, 3, 0)
         if artificial_enemy.desired_pos != None:
             pygame.draw.aaline(DISPSURF, (255, 0, 0), enemyTank.rotated_chassis_rect.center, artificial_enemy.desired_pos, True)
 
-
-        
-        for x in range(len(munition_objects)):
-            munition_x = munition_objects[x]
-            munition_x.generate_munition()
-
-            munition_overlap = pygame.sprite.collide_mask(munition_x.munition_sprite, enemyTank.chassis_sprite)
-            if munition_overlap == None:
-                if munition_x.unit_id != playerTank.unit_id:
-                    munition_overlap = pygame.sprite.collide_mask(munition_x.munition_sprite, playerTank.chassis_sprite)
-            if munition_overlap != None:
-                #pygame.draw.circle(DISPSURF, (255, 255, 255), munition_x.rotated_munition_rect.center, 10, 0)
-                impact_object = munition_x.impact_initiation()
-                impact_objects.append(impact_object)
-                munition_objects_culling.append(munition_x)
-
-                
-            if munition_x.exceeded_distance == True:
-                munition_objects_culling.append(munition_x)
-
-
-        for x in range(len(impact_objects)):
-            impact_x = impact_objects[x]
-            if impact_x.animation_complete == True:
-                impact_objects_culling.append(impact_x)
-            else:
-                impact_x.generate_impact()
-
-
-        if len(impact_objects_culling) > 0:
-            for x in range(len(impact_objects_culling)):
-                for i in range(len(impact_objects)):
-                    if impact_objects_culling[x] == impact_objects[i]:
-                        del impact_objects[i]
-                        break
-            
-
-        if len(munition_objects_culling) > 0:
-            for x in range(len(munition_objects_culling)):
-                for i in range(len(munition_objects)):
-                    if munition_objects_culling[x] == munition_objects[i]:
-                        del munition_objects[i]
-                        break
         if artificial_enemy.desired_pos != None:
             pygame.draw.circle(DISPSURF, (255, 0, 255), artificial_enemy.desired_pos, 3, 0)
 
