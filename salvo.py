@@ -497,13 +497,22 @@ class Tank():
                         if ammo_remaining == True:
                             if self.weapon_firing[weapon]['reload_required'] == False:
                                 munition = Munition(self.weapon_loadout[weapon]['munition_object'], self.degree_val, self.absolute_turret_tip_pos[weapon], self.unit_id, self.allegiance, self.master_sector)
+<<<<<<< HEAD
+                                self.master_sector.add_munition_object(munition)
+=======
+>>>>>>> 302bb7bfbcae48eb0aebc5ab50bd857e3ffc4c22
                                 self.weapon_loadout[weapon]['ammo_loaded'] -= 1
                                 recheck_ammo = self.munitions_ammo_check(weapon)
                                 if self.weapon_firing[weapon]['release_required'] == False:
                                     self.weapon_firing[weapon]['release_required'] = True
 
                                 self.weapon_firing[weapon]['last_shot'] = CURRENT_TIME
+<<<<<<< HEAD
+                                #return munition
+                                return None
+=======
                                 return munition
+>>>>>>> 302bb7bfbcae48eb0aebc5ab50bd857e3ffc4c22
         return None
 
 
@@ -940,7 +949,11 @@ class Munition():
         colliding_unit = self.master_sector.check_munition_sprite_collision(self.munition_id)
         if colliding_unit != None:
             impact_object = self.impact_initiation()
+<<<<<<< HEAD
+            self.master_sector.add_impact_object(impact_object)
+=======
             self.master_sector.impact_objects.append(impact_object)
+>>>>>>> 302bb7bfbcae48eb0aebc5ab50bd857e3ffc4c22
             self.master_sector.cull_munition(self.allegiance, self.munition_id)
 
 
@@ -1558,6 +1571,23 @@ class MasterSector():
 
         return sectors_occupied
 
+<<<<<<< HEAD
+    
+    def add_munition_object(self, munition_object):
+        '''
+        Adds a munition object spawned by a unit into the MasterSector.munition_objects attribute to allow for proper generation and control.
+        '''
+        self.munition_objects.append(munition_object)
+
+
+    def add_impact_object(self, impact_object):
+        '''
+        Adds an impact object spawned by a munition into the MasterSector.impact_objects attribute to allow for proper generation and control.
+        '''
+        self.impact_objects.append(impact_object)
+
+=======
+>>>>>>> 302bb7bfbcae48eb0aebc5ab50bd857e3ffc4c22
 
     def generate_munitions(self):
         '''
