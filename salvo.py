@@ -3,10 +3,11 @@
 
 #Notes To Self
 
-#SIGN OFF NOTES 11/03/19 9:35pm
-# * Must complete testing of Obstacle class integration; must complete integration of Obstacle class into the enemy_AI FOV sight methods
-
-# * Must check integration of the Muniton class with the MasterSector class, allowing them to finally act as real objects within the world, rather than requiring specified targets. 
+#SIGN OFF NOTES 11/05/19 1:30am
+# * Must complete damage integration for the Munitions class (in that the MasterSector method is as of yet incomplete and does not provide AoE functionality)
+# * Must completely revamp the housing schema for the Tanks class (and units as a whole, which will now be required to stay within the confines of the MasterSector.unit_objects dict)
+# * Must consider changing the MasterSector.munition_objects/MasterSector.impact_objects attributes, as they are lists but would be better suited as dictionaries, as has been done with the unit_objects attribute.
+# * Must complete the take_damage method for the Tank class. Must completely introduce a take_damage method for the Obstacle class.
 
 #CURRENT VERSION CHANGES
 # * Checked the integration of the Obstacle class within the MasterSector class, and all seems well - granted this is suspicious in and of itself, and will be regarded with distrust for the forseeable future.
@@ -111,12 +112,14 @@ class Tank():
         chassis = dict(chassis)
         chassis['chassis_move_speed'] = dict(chassis['chassis_move_speed'])
         chassis['chassis_direction'] = dict(chassis['chassis_direction'])
+        chassis['health'] = dict(chassis['health'])
         turret = dict(turret)
         munitions_omni = list(munitions_omni)
         for x in range(len(munitions_omni)):
             munitions_omni[x] = dict(munitions_omni[x])
 
         self.unit_type = 'tank'
+        self.health = chassis['health']
         self.chassis_img = chassis['img']
         self.turret_img = turret['img']
         self.chassis_move_speed = chassis['chassis_move_speed']
@@ -522,31 +525,13 @@ class Tank():
 
     def weapons_firing_initiate(self):
 
-        spawned_munitions = []
-        
-##        for x in range(len(self.weapon_firing)):
-##            munition_x = None
-##            if x == 0 and self.weapon_firing[x]['firing'] == True:
-##                munition_x = self.fire_main_battery()
-##            elif x == 1 and self.weapon_firing[x]['firing'] == True:
-##                 munition_x = self.fire_secondary_battery()
-##            elif x == 2 and self.weapon_firing[x]['firing'] == True:
-##                 munition_x = self.fire_tertiary_battery()
-##            if munition_x != None:
-##                spawned_munitions.append(munition_x)
-
         for x in range(len(self.weapon_loadout)):
-            munition_x = None
             if self.weapon_firing[x]['firing'] == True and self.weapon_variables[x][1] == 'primary':
-                munition_x = self.fire_selected_battery(0)
+                self.fire_selected_battery(0)
             elif self.weapon_firing[x]['firing'] == True and self.weapon_variables[x][1] == 'secondary':
-                munition_x = self.fire_selected_battery(1)
+                self.fire_selected_battery(1)
             elif self.weapon_firing[x]['firing'] == True and self.weapon_variables[x][1] == 'tertiary':
-                munition_x = self.fire_selected_battery(2)
-            if munition_x != None:
-                spawned_munitions.append(munition_x)
-
-        return spawned_munitions
+                self.fire_selected_battery(2)
 
 
 
@@ -649,6 +634,35 @@ class Tank():
             self.turret_sprite.rect = self.rotated_turret_rect
             self.turret_sprite.mask = self.turret_mask
 
+    
+    def take_damage(self, damage_dict):
+        '''
+        Receives a damage dictionary from a munition object and applies the values in order to adjust the instance's health
+        appropriately.
+
+        damage_dict: {'pen_dmg': int, 'he_dmg': int, 'pen_mod': int, 'he_mod': int}
+        '''
+        current_health = self.health['health']
+        unit_pen_mod = self.health['pen_mod']
+        unit_he_mod = self.health['he_mod']
+
+        pen_dmg = (damage_dict['pen_dmg'] * (1 + (damage_dict['pen_mod'] / 1000)) * (1 - (unit_pen_mod / 1000))) - (unit_pen_mod / 10)
+        if pen_dmg < 0:
+            pen_dmg = 0
+        he_dmg = (damage_dict['he_dmg'] * (1 + (damage_dict['he_mod'] / 1000)) * (1 - (unit_he_mod / 1000))) - (unit_he_mod / 10)
+        if he_dmg < 0:
+            he_dmg = 0
+        total_dmg = pen_dmg + he_dmg
+
+        current_health -= total_dmg
+        if current_health < 0:
+            current_health = 0
+        self.health['health'] = int(current_health)
+
+
+        
+
+
     def update_master_sector(self):
         self.master_sector.update_unit(self.unit_id, self.allegiance, self.unit_type, {'chassis': {'rect': self.rotated_chassis_rect, 'degree_val': self.chassis_degree_val, 'pos': self.chassis_pos, 'bounding_points': self.bounding_points, 'rot_axis': self.rotated_chassis_rect.center, 'unit_sprite': self.chassis_sprite}, 'turret': {'rect': self.rotated_chassis_rect, 'degree_val': self.chassis_degree_val, 'pos': self.chassis_pos, 'bounding_points': self.bounding_points, 'rot_axis': self.rotated_chassis_rect.center}, 'turret': {'rect': self.rotated_turret_rect, 'degree_val': self.degree_val, 'pos': (self.rotated_turret_rect.x, self.rotated_turret_rect.y), 'weapon_bounding_points': self.weapon_bounding_points, 'rot_axis': self.chassis_turret_pos, 'unit_sprite': self.turret_sprite}})
 
@@ -738,7 +752,7 @@ class Tank():
 
         self.update_master_sector()
         self.check_unit_collision()
-        DISPSURF.blit(self.rotated_chassis, self.rotated_chassis_rect)######
+        DISPSURF.blit(self.rotated_chassis, self.rotated_chassis_rect)
         DISPSURF.blit(self.rotated_turret, self.rotated_turret_rect)
 
 
@@ -759,6 +773,7 @@ class Munition():
         self.munition_img = munition['img']
         self.munition_type = munition['munition_type']
         self.munition_move_speed = munition['munition_move_speed']
+        self.munition_damage = munition['damage']
         self.degree_variance = munition['degree_variance']
         self.munition_degree_val = munition_degree_val
         self.munition_degree_change = False
@@ -850,8 +865,6 @@ class Munition():
 
     def apply_degree_variance(self):
         degree_val = self.munition_degree_val
-
-
         if self.degree_variance != 0:
             degree_change = random.uniform(-self.degree_variance, self.degree_variance)
 
@@ -862,7 +875,6 @@ class Munition():
                 degree_val = (degree_val + degree_change) - 360
             else:
                 degree_val += degree_change
-
 
         self.munition_degree_val = degree_val
         self.munition_degree_change = True
@@ -878,7 +890,6 @@ class Munition():
         munition_pos = self.munition_pos
         munition_move_speed= self.munition_move_speed
 
-        
         munition_velocity = pygame.math.Vector2(1, 0).rotate(munition_degree_val) * munition_move_speed
         munition_move_pos = munition_pos + munition_velocity
         munition_move_pos = (round(munition_move_pos[0]), round(munition_move_pos[1]))
@@ -944,7 +955,7 @@ class Munition():
             impact_object = self.impact_initiation()
             self.master_sector.add_impact_object(impact_object)
             self.master_sector.cull_munition(self.allegiance, self.munition_id)
-
+            self.master_sector.enact_munition_damage(colliding_unit, self.munition_damage, self.rotated_munition_rect.center)
 
     
     def check_munition_distance(self):
@@ -1268,6 +1279,7 @@ class MasterSector():
         self.sectors = self.generate_sectors()
         self.sector_keys = self.get_sector_keys()
         self.units = {}
+        self.unit_objects = {}
         self.turrets = {}
         self.munitions = {}
         self.munition_objects = []
@@ -1381,6 +1393,12 @@ class MasterSector():
                 self.sectors[updated_sectors[x]].add_impact(impact_id)
         return updated_sectors
 
+    
+    def instantiate_unit(self, unit_dict):
+        if unit_dict['unit_type'] == 'tank':
+            new_unit = Tank(unit_dict['chassis'], unit_dict['turret'], unit_dict['munitions'], unit_dict['ammo'], unit_dict['pos'], unit_dict['allegiance'], self)
+            self.unit_objects[new_unit.unit_id] = new_unit
+            return new_unit.unit_id
 
     
     def create_munition(self, munition_id, unit_id, unit_allegiance, munition_type, munition_dict):
@@ -1412,6 +1430,16 @@ class MasterSector():
                         mask_collision = pygame.sprite.collide_mask(self.munitions[munition_id]['unit_sprite'], self.units[unit_i]['unit_sprite'])
                         if mask_collision != None:
                             return unit_i
+
+
+    def cull_unit(self, unit_allegiance, unit_id):
+        '''
+        Culls a unit from any sectors it inhabits, along with the MasterSector.units attribute, as well as the MasterSector.unit_objects attribute, erasing the unit.
+        '''
+        for x in range(len(self.units[unit_id]['sectors'])):
+            self.sectors[self.units[unit_id]['sectors'][x]].remove.unit(unit_allegiance, unit_id)
+        del self.units[unit_id]
+        del self.unit_objects[unit_id]
 
     
     def cull_munition(self, unit_allegiance, munition_id):
@@ -1561,6 +1589,13 @@ class MasterSector():
         return sectors_occupied
 
     
+    def add_unit_object(self, unit_id, unit_object):
+        '''
+        Adds a unit object into the MasterSector.unit_objects attribute to allow for proper generation and control.
+        '''
+        self.unit_objects[unit_id] = unit_object
+
+    
     def add_munition_object(self, munition_object):
         '''
         Adds a munition object spawned by a unit into the MasterSector.munition_objects attribute to allow for proper generation and control.
@@ -1573,6 +1608,18 @@ class MasterSector():
         Adds an impact object spawned by a munition into the MasterSector.impact_objects attribute to allow for proper generation and control.
         '''
         self.impact_objects.append(impact_object)
+
+    
+    def generate_units(self):
+        '''
+        Generates the various unit objects housed within the MasterSector unit_objects attribute.
+        '''
+        unit_keys = list(self.units.keys())
+        for x in range(len(unit_keys)):
+            if self.unit_objects[unit_keys[x]].unit_type == 'tank':
+                self.unit_objects[unit_keys[x]].generate_tank()
+            elif self.unit_objects[unit_keys[x]].unit_type == 'obstacle':
+                self.unit_objects[unit_keys[x]].generate_obs()
 
 
     def generate_munitions(self):
@@ -1595,6 +1642,25 @@ class MasterSector():
             impact_x = generated_impacts_list[x]
             impact_x.generate_impact()
         generated_impacts_list = None
+
+    
+    def enact_munition_damage(self, colliding_unit, damage_dict, collision_pos):
+        '''
+        Receives the colliding unit_id, a damage_dict containing relevant damage data and an origin position for the impact.
+        Provides the damage_dict to the colliding_unit to allow it to calculate the damage done and then checks for area-of-effect
+        damage, if any, and provides the damage_dict to those affected units as well, ensuring not to cause the colliding_unit to
+        render damage twice.
+        '''
+        print(self.units[colliding_unit])
+        self.unit_objects[colliding_unit].take_damage(damage_dict['direct'])
+        print(self.unit_objects[colliding_unit].health['health'])
+        if damage_dict['area'] != None and damage_dict['area'] == None: #impossible conditional, remove second condition to reemploy code.
+            radius = damage_dict['area']['dist']
+            damage_rect = pygame.Rect(collision_pos[0] - radius, collision_pos[1] - radius, radius * 2, radius * 2)
+            damage_sectors = self.sector_point_collision_omni(damage_rect)
+            unit_list_omni = [self.sectors[damage_sectors[x]].unit_list_omni[i] for i in range(len(self.sectors[damage_sectors[x]].unit_list_omni)) for x in range(len(damage_sectors))]
+            
+
 
 
     def get_unit_bounding_connections(self, unit_rect, unit_bounding_points):
@@ -2395,8 +2461,10 @@ class MasterSector():
 
 
 class EnemyAI():
-    def __init__(self, tank, master_sector):
-        self.tank = tank
+    def __init__(self, unit_id, master_sector):
+        self.unit_id = unit_id
+        self.master_sector = master_sector
+        self.tank = self.master_sector.unit_objects[self.unit_id]
         self.allegiance = self.tank.allegiance
         self.desired_pos = None
         self.confirmed_desired_pos = None
@@ -2405,7 +2473,6 @@ class EnemyAI():
         self.target_unit = None
         self.path_info = {'graph': None, 'path': None, 'start': None, 'goal': None, 'closest_node_start': None, 'closest_node_goal': None, 'tested_nodes': None}
         self.path_stats = {'path_gen': None, 'path_followed': False, 'path_initiated': False}
-        self.master_sector = master_sector
         self.fov_deltoid = None
         self.fov_rect = None
         self.fov_unit_stats = {}
@@ -3458,14 +3525,15 @@ def main():
 
     standard_chassis = {'img': chassis_img, 'chassis_move_speed': {'forward': 2, 'reverse': -1.5}, 'chassis_turn_speed': 2,
                              'chassis_direction': {'turn': None, 'move': None}, 'rotate_offset': (44, 0), 'turret_offsets': [(-18, -1)],
-                        'node_distance': 100, 'bounding_offsets': [(43, -30), (43, 30), (-45, -30), (-45, 30)]}
+                        'node_distance': 100, 'bounding_offsets': [(43, -30), (43, 30), (-45, -30), (-45, 30)],
+                        'health': {'mortal': True, 'max_health': 1200, 'health': 1200, 'pen_mod': 450, 'he_mod': 210}}
     
-    standard_shell = {'img': standard_shell_img, 'munition_type': 'standard_shell', 'munition_move_speed': 21, 'maximum_distance': 2000, 'designation': 'primary', 'munition_offset': (10, 0), 'degree_variance': 0, 'firing_rate': 1, 'round_capacity': 1, 'maximum_ammo': 30, 'initial_ammo': 15, 'reload_time_ms': 2000, 'impact': explosion_large_shockwave_impact}
+    standard_shell = {'img': standard_shell_img, 'munition_type': 'standard_shell', 'munition_move_speed': 21, 'maximum_distance': 2000, 'designation': 'primary', 'munition_offset': (10, 0), 'degree_variance': 0, 'firing_rate': 1, 'round_capacity': 1, 'maximum_ammo': 30, 'initial_ammo': 15, 'reload_time_ms': 2000, 'impact': explosion_large_shockwave_impact, 'damage': {'direct': {'pen_dmg': 150, 'he_dmg': 300, 'pen_mod': 50, 'he_mod': 200}, 'area': {'pen_dmg': 0, 'he_dmg': 150, 'pen_mod': 0, 'he_mod': 100, 'dist': 50}}}
 
-    fortyfour_mm_round = {'img': fortyfour_mm_round_img.convert_alpha(), 'munition_type': 'fortyfour_mm_round', 'munition_move_speed': 44, 'maximum_distance': 1250, 'designation': 'secondary', 'munition_offset': (5, 0), 'degree_variance': 3, 'firing_rate': 50, 'round_capacity': 100, 'maximum_ammo': 2000, 'initial_ammo': 1000, 'reload_time_ms': 1500, 'impact': explosion_mini_impact}
+    fortyfour_mm_round = {'img': fortyfour_mm_round_img.convert_alpha(), 'munition_type': 'fortyfour_mm_round', 'munition_move_speed': 44, 'maximum_distance': 1250, 'designation': 'secondary', 'munition_offset': (5, 0), 'degree_variance': 3, 'firing_rate': 50, 'round_capacity': 100, 'maximum_ammo': 2000, 'initial_ammo': 1000, 'reload_time_ms': 1500, 'impact': explosion_mini_impact, 'damage': {'direct': {'pen_dmg': 80, 'he_dmg': 27, 'pen_mod': 50, 'he_mod': 160}, 'area': None}}
     
     #Obs Sprite Variables
-    pine_obs = {'img': pine_tree_img, 'rotate_offset': (44, 0), 'bounding_offsets': [(50, -50), (50, 50), (-50, -50), (-50, 50)]}
+    pine_obs = {'img': pine_tree_img, 'rotate_offset': (44, 0), 'bounding_offsets': [(50, -50), (50, 50), (-50, -50), (-50, 50)], 'health': {'mortal': False}}
 
     #PlayerTank variables
     
@@ -3477,7 +3545,11 @@ def main():
 
 
     player_tank_turret = turret_generator(base_turret, [standard_barrel, minigun_left, minigun_right])
-    playerTank = Tank(standard_chassis, player_tank_turret, [standard_shell, fortyfour_mm_round], {'standard_shell': 100, 'fortyfour_mm_round': 10000}, chassis_pos, 'PLAYER', master_sector)
+    #playerTank = Tank(standard_chassis, player_tank_turret, [standard_shell, fortyfour_mm_round], {'standard_shell': 100, 'fortyfour_mm_round': 10000}, chassis_pos, 'PLAYER', master_sector)
+    playerTank_dict = {'unit_type': 'tank', 'chassis': standard_chassis, 'turret': player_tank_turret, 'munitions': [standard_shell, fortyfour_mm_round], 'ammo': {'standard_shell': 100, 'fortyfour_mm_round': 10000}, 'pos': chassis_pos, 'allegiance': 'PLAYER'}
+    playerTank_id = master_sector.instantiate_unit(playerTank_dict)
+ 
+
 
     #SecondTank variables
 
@@ -3490,9 +3562,13 @@ def main():
     desired_pos = None
 
     enemy_tank_turret = turret_generator(base_turret, [standard_barrel])
-    enemyTank = Tank(standard_chassis, enemy_tank_turret, [standard_shell], {}, e_chassis_pos, 'ENEMY', master_sector)
+    #enemyTank = Tank(standard_chassis, enemy_tank_turret, [standard_shell], {}, e_chassis_pos, 'ENEMY', master_sector)
+    enemyTank_dict = {'unit_type': 'tank', 'chassis': standard_chassis, 'turret': enemy_tank_turret, 'munitions': [standard_shell], 'ammo': {'standard_shell': 15}, 'pos': e_chassis_pos, 'allegiance': 'ENEMY'}
+    enemyTank_id = master_sector.instantiate_unit(enemyTank_dict)
+    enemyTank = master_sector.unit_objects[enemyTank_id]
 
-    artificial_enemy = EnemyAI(enemyTank, master_sector)
+
+    artificial_enemy = EnemyAI(enemyTank_id, master_sector)
     artificial_enemy.tank.generate_tank(DISPSURF)
 
     enemy_chassis2 = dict(standard_chassis)
@@ -3500,17 +3576,19 @@ def main():
     #enemyTank2 = Tank(enemy_chassis2, enemy_tank_turret2, [standard_shell], {}, (500, 300), 'ENEMY', master_sector)
     #artificial_enemy2 = EnemyAI(enemyTank2, master_sector)
 
-    print(playerTank.unit_id)
-    print(artificial_enemy.tank.unit_id)
+    #print(playerTank.unit_id)
+    #print(artificial_enemy.tank.unit_id)
     
-    impact_objects = []
-    munition_objects = []
 
     #AuxiliaryTank variables
     aux_tanks = []
     aux_positions = [(500, 300)] #[(200, 450), (625, 350), (800, 450), (500, 300), (75, 100), (575, 75), (925, 75), (900, 575), (60, 500)]
     for x in range(len(aux_positions)):
-        aux_tank = Tank(enemy_chassis2, enemy_tank_turret2, [standard_shell], {}, aux_positions[x], 'ENEMY', master_sector)
+        #aux_tank = Tank(enemy_chassis2, enemy_tank_turret2, [standard_shell], {}, aux_positions[x], 'ENEMY', master_sector)
+        #aux_tanks.append(aux_tank)
+        auxTank_dict = dict(enemyTank_dict)
+        auxTank_dict['pos'] = aux_positions[x]
+        aux_tank = master_sector.instantiate_unit(auxTank_dict)
         aux_tanks.append(aux_tank)
 
     aux_enemies = []
@@ -3547,7 +3625,7 @@ def main():
                 pygame_quit()
             elif event.type == MOUSEMOTION:
                 mouse['mouse_x'], mouse['mouse_y'] = event.pos
-                playerTank.update_target_via_mouse(mouse)
+                master_sector.unit_objects[playerTank_id].update_target_via_mouse(mouse)
                 #enemyTank.update_target_via_mouse(mouse)
                 for x in range(len(aux_enemies)):
                     aux_enemies[x].tank.update_target_via_mouse(mouse)
@@ -3593,11 +3671,6 @@ def main():
                     time_stop_clock = pygame.time.get_ticks()
                     total_time = time_stop_clock - time_start_clock
                     print(total_time)
-                elif (event.key == K_o):
-                    obstacle_list = generate_obstacle((mouse['mouse_x'], mouse['mouse_y']), obstacle_list, [playerTank, artificial_enemy.tank])
-                elif (event.key == K_j): #TEMPORARY DELETE ME
-                    if degree_rotation_change != 0.0:
-                        playerTank.degree_val += degree_rotation_change
             elif event.type == KEYUP:
                 if (event.key == K_LEFT or event.key == K_a):
                     if chassis_direction['turn'] == 'counterclock':
@@ -3615,15 +3688,11 @@ def main():
                     weapon_reloading = False
 
         if weapon_reloading == True:
-            check_weapon_reload(playerTank)
+            check_weapon_reload(master_sector.unit_objects[playerTank_id])
             
-        playerTank.update_chassis_direction_via_keys(chassis_direction)
-        playerTank.update_firing_check(weapon_firing)
-        munitions_spawned = playerTank.weapons_firing_initiate()
-        if len(munitions_spawned) > 0:
-            for x in range(len(munitions_spawned)):
-                master_sector.munition_objects.append(munitions_spawned[x])
-                rounds_fired += 1
+        master_sector.unit_objects[playerTank_id].update_chassis_direction_via_keys(chassis_direction)
+        master_sector.unit_objects[playerTank_id].update_firing_check(weapon_firing)
+        master_sector.unit_objects[playerTank_id].weapons_firing_initiate()
                 
                     
         DISPSURF.fill(BGCOLOR)
@@ -3636,7 +3705,7 @@ def main():
 
 
         
-        playerTank.generate_tank(DISPSURF)
+        master_sector.unit_objects[playerTank_id].generate_tank(DISPSURF)
 
         artificial_enemy.operations_management()
         artificial_enemy.tank.generate_tank(DISPSURF)
@@ -3778,16 +3847,16 @@ def main():
 
 #######################TANK CHASSIS COLLISION CORRECTION
 ####
-        tank_degree_pos = pos_from_degrees(playerTank.rotated_chassis_rect.center, playerTank.chassis_degree_val, 50)
-        pygame.draw.aaline(DISPSURF, (255, 255, 255), playerTank.rotated_chassis_rect.center, tank_degree_pos, True)
+        tank_degree_pos = pos_from_degrees(master_sector.unit_objects[playerTank_id].rotated_chassis_rect.center, master_sector.unit_objects[playerTank_id].chassis_degree_val, 50)
+        pygame.draw.aaline(DISPSURF, (255, 255, 255), master_sector.unit_objects[playerTank_id].rotated_chassis_rect.center, tank_degree_pos, True)
 
             
         closest_points = []
         point_distances = []
         point_info = []
-        for x in range(len(master_sector.units[playerTank.unit_id]['bounding_points'])):
-            point_x = master_sector.units[playerTank.unit_id]['bounding_points'][x]
-            point_dist = distance_between_positions(artificial_enemy.tank.rotated_chassis_rect.center, master_sector.units[playerTank.unit_id]['bounding_points'][x])
+        for x in range(len(master_sector.units[master_sector.unit_objects[playerTank_id].unit_id]['bounding_points'])):
+            point_x = master_sector.units[master_sector.unit_objects[playerTank_id].unit_id]['bounding_points'][x]
+            point_dist = distance_between_positions(artificial_enemy.tank.rotated_chassis_rect.center, master_sector.units[master_sector.unit_objects[playerTank_id].unit_id]['bounding_points'][x])
             point_distances.append(point_dist)
             point_info.append((x, point_dist, point_x))
         closest_point = min(point_distances)
@@ -3795,9 +3864,9 @@ def main():
         closest_points.append(closest_point)
         for x in range(len(closest_points)):
             pygame.draw.circle(DISPSURF, (255, 0, 0), closest_points[x][0], 3, 0)
-            connections_indexes = master_sector.units[playerTank.unit_id]['bounding_connections'][closest_points[x][1]]
+            connections_indexes = master_sector.units[playerTank_id]['bounding_connections'][closest_points[x][1]]
             connections_indexes = [connections_indexes['clockwise_index'], connections_indexes['counterclock_index']]
-            connections_points = [master_sector.units[playerTank.unit_id]['bounding_points'][connections_indexes[i]] for i in range(len(connections_indexes))]
+            connections_points = [master_sector.units[playerTank_id]['bounding_points'][connections_indexes[i]] for i in range(len(connections_indexes))]
             for i in range(len(connections_points)):
                 pygame.draw.circle(DISPSURF, (0, 255, 0), connections_points[i], 3, 0)
                 pygame.draw.aaline(DISPSURF, (0, 0, 255), connections_points[i], closest_points[x][0], True)
@@ -3805,7 +3874,7 @@ def main():
         closest_point = artificial_enemy.tank.bounding_points[0]
         point_dist_lowest = 100000
         for x in range(len(artificial_enemy.tank.bounding_points)):
-            point_dist = distance_between_positions(artificial_enemy.tank.bounding_points[x], playerTank.rotated_chassis_rect.center)
+            point_dist = distance_between_positions(artificial_enemy.tank.bounding_points[x], master_sector.unit_objects[playerTank_id].rotated_chassis_rect.center)
             if point_dist < point_dist_lowest:
                 closest_point = artificial_enemy.tank.bounding_points[x]
                 point_dist_lowest = point_dist
@@ -4557,18 +4626,17 @@ def main():
             ######################################################################################################
 
             
-        tank_degrees_pos = pos_from_degrees(playerTank.chassis_turret_pos, playerTank.degree_val, 50)
-        pygame.draw.aaline(DISPSURF, (255, 0, 0), playerTank.chassis_turret_pos, tank_degrees_pos, True)
+        tank_degrees_pos = pos_from_degrees(master_sector.unit_objects[playerTank_id].chassis_turret_pos, master_sector.unit_objects[playerTank_id].degree_val, 50)
+        pygame.draw.aaline(DISPSURF, (255, 0, 0), master_sector.unit_objects[playerTank_id].chassis_turret_pos, tank_degrees_pos, True)
         
         
-        for x in range(len(master_sector.turrets[playerTank.unit_id]['weapon_bounding_points'])):
-            #pygame.draw.circle(DISPSURF, (255, 0, 0), master_sector.turrets[playerTank.unit_id]['weapon_bounding_points'][x]['center'], 3, 0)
+        for x in range(len(master_sector.turrets[master_sector.unit_objects[playerTank_id].unit_id]['weapon_bounding_points'])):
             closest_points = []
             point_distances = []
             point_info = []
 
-            for i in range(len(master_sector.turrets[playerTank.unit_id]['weapon_bounding_points'][x]['bounding_points'])):
-                point_i = master_sector.turrets[playerTank.unit_id]['weapon_bounding_points'][x]['bounding_points'][i]
+            for i in range(len(master_sector.turrets[playerTank_id]['weapon_bounding_points'][x]['bounding_points'])):
+                point_i = master_sector.turrets[playerTank_id]['weapon_bounding_points'][x]['bounding_points'][i]
                 point_dist = distance_between_positions(artificial_enemy.tank.rotated_chassis_rect.center, point_i)
                 point_distances.append(point_dist)
                 point_info.append((i, point_dist, point_i))
@@ -4577,9 +4645,9 @@ def main():
             closest_points.append(closest_point)
             for i in range(len(closest_points)):
                 pygame.draw.circle(DISPSURF, (255, 0, 0), closest_points[i][0], 3, 0)
-                connections_indexes = master_sector.turrets[playerTank.unit_id]['weapon_bounding_connections'][x][closest_points[i][1]]
+                connections_indexes = master_sector.turrets[playerTank_id]['weapon_bounding_connections'][x][closest_points[i][1]]
                 connections_indexes = [connections_indexes['clockwise_index'], connections_indexes['counterclock_index']]
-                connections_points = [master_sector.turrets[playerTank.unit_id]['weapon_bounding_points'][x]['bounding_points'][connections_indexes[y]] for y in range(len(connections_indexes))]
+                connections_points = [master_sector.turrets[playerTank_id]['weapon_bounding_points'][x]['bounding_points'][connections_indexes[y]] for y in range(len(connections_indexes))]
                 for y in range(len(connections_points)):
                     pygame.draw.circle(DISPSURF, (0, 255, 0), connections_points[y], 3, 0)
                     pygame.draw.aaline(DISPSURF, (0, 0, 255), connections_points[y], closest_points[i][0], True)
@@ -4587,7 +4655,7 @@ def main():
         closest_point = artificial_enemy.tank.bounding_points[0]
         point_dist_lowest = 100000
         for i in range(len(artificial_enemy.tank.bounding_points)):
-            point_dist = distance_between_positions(artificial_enemy.tank.bounding_points[i], playerTank.rotated_turret_rect.center)
+            point_dist = distance_between_positions(artificial_enemy.tank.bounding_points[i], master_sector.unit_objects[playerTank_id].rotated_turret_rect.center)
             if point_dist < point_dist_lowest:
                 closest_point = artificial_enemy.tank.bounding_points[i]
                 point_dist_lowest = point_dist
@@ -4608,16 +4676,16 @@ def main():
 ##            color_collision = (255, 0, 0)
 ##            pygame.draw.circle(DISPSURF, color_collision, playerTank.rotated_chassis_rect.center, 15, 0)
 
-        chosen_bounding = master_sector.turrets[playerTank.unit_id]['weapon_bounding_points'][2]['bounding_points'][2]
-        other_bounding = master_sector.turrets[playerTank.unit_id]['weapon_bounding_points'][2]['bounding_points'][3]
-        other_other_bounding = master_sector.turrets[playerTank.unit_id]['weapon_bounding_points'][2]['bounding_points'][1]
-        final_other_bounding = master_sector.turrets[playerTank.unit_id]['weapon_bounding_points'][2]['bounding_points'][0]
-        dist_turret_to_chosen_bounding = distance_between_positions(playerTank.chassis_turret_pos, chosen_bounding)
-        dist_to_other_bounding = distance_between_positions(playerTank.chassis_turret_pos, other_bounding)
-        dist_to_other_other_bounding = distance_between_positions(playerTank.chassis_turret_pos, other_other_bounding)
-        dist_to_final_other_bounding = distance_between_positions(playerTank.chassis_turret_pos, final_other_bounding)
-        pygame.draw.circle(DISPSURF, (255, 0, 255), playerTank.chassis_turret_pos, dist_turret_to_chosen_bounding, 1)
-        pygame.draw.circle(DISPSURF, (255, 0, 255), playerTank.chassis_turret_pos, dist_to_other_bounding, 1)
+        chosen_bounding = master_sector.turrets[playerTank_id]['weapon_bounding_points'][2]['bounding_points'][2]
+        other_bounding = master_sector.turrets[playerTank_id]['weapon_bounding_points'][2]['bounding_points'][3]
+        other_other_bounding = master_sector.turrets[playerTank_id]['weapon_bounding_points'][2]['bounding_points'][1]
+        final_other_bounding = master_sector.turrets[playerTank_id]['weapon_bounding_points'][2]['bounding_points'][0]
+        dist_turret_to_chosen_bounding = distance_between_positions(master_sector.unit_objects[playerTank_id].chassis_turret_pos, chosen_bounding)
+        dist_to_other_bounding = distance_between_positions(master_sector.unit_objects[playerTank_id].chassis_turret_pos, other_bounding)
+        dist_to_other_other_bounding = distance_between_positions(master_sector.unit_objects[playerTank_id].chassis_turret_pos, other_other_bounding)
+        dist_to_final_other_bounding = distance_between_positions(master_sector.unit_objects[playerTank_id].chassis_turret_pos, final_other_bounding)
+        pygame.draw.circle(DISPSURF, (255, 0, 255), master_sector.unit_objects[playerTank_id].chassis_turret_pos, dist_turret_to_chosen_bounding, 1)
+        pygame.draw.circle(DISPSURF, (255, 0, 255), master_sector.unit_objects[playerTank_id].chassis_turret_pos, dist_to_other_bounding, 1)
         #pygame.draw.circle(DISPSURF, (0, 255, 255), playerTank.chassis_turret_pos, dist_to_other_other_bounding, 1)
         #pygame.draw.circle(DISPSURF, (0, 255, 255), playerTank.chassis_turret_pos, dist_to_final_other_bounding, 1)
 
