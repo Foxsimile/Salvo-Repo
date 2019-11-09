@@ -1,13 +1,25 @@
 # Salvo
-# v0_9_6_9ze
+# v0_9_6_9zj
 
 #Notes To Self
 
-#SIGN OFF NOTES 11/05/19 1:30am
-# * Must complete damage integration for the Munitions class (in that the MasterSector method is as of yet incomplete and does not provide AoE functionality)
-# * Must completely revamp the housing schema for the Tanks class (and units as a whole, which will now be required to stay within the confines of the MasterSector.unit_objects dict)
-# * Must consider changing the MasterSector.munition_objects/MasterSector.impact_objects attributes, as they are lists but would be better suited as dictionaries, as has been done with the unit_objects attribute.
-# * Must complete the take_damage method for the Tank class. Must completely introduce a take_damage method for the Obstacle class.
+#SIGN OFF NOTES 11/07/19 1:30am:
+# * Must finish integration of the Obstacle class within the MasterSector, as it currently does not allow the instantiate_unit method to be used on it, and as such it cannot be created within the scope
+#of the MasterSector itself, as opposed to as an outside object - this is crucial as, to avoid unnecessary cluttering, all objects will be housed within the MasterSector and any outside necessities will
+#utilize the unit_id, which is returned from the instantiate_unit method.
+# ^> Much of the integration of the Obstacle class has been complete, and the instantiate_unit method has been ammended to include the Obstacle class successfully. Currently, the obstacle (much like the other units)
+#is still generated from code outside of the MasterSector class, which must be remedied entirely in order to preserve consistency and ensure that objects are completely deleted when called for, rather than referenced
+#by forgotten variables outside of the scope of the MasterSector.
+# * Must add death animation/functionality, though the current methods are working as intended.
+# * The solution to true, legitimate integration has been realized, as the only outliers are currently the AI's and the issues that they possess - including the player. The resolution, however, is simple:
+#The AIs must also be housed within the MasterSector, and their generation functions must be integrated as well. The direct affecting of the unit - as well as the housing of the unit within the AI - will cease,
+#to be replaced with references. The connection between the two will be the unit_id, as it should have been all along. The AI will reference the tank (or whatever unit it is associated with) by the unit_id, which
+#it will share and be referenced by in kind. Thus, when the MasterSector deletes a unit_object, it may also delete any AI_objects that share the same unit_id, resolving their existance and ensuring no unnecessary
+#objects remain in memory due to circular referencing.
+# ^> The player will be somewhat similar, however I am beginning to consider the possibility that, perhaps, the player might require their own class, which will allow for control of their unit much the same as the
+#AI controls theirs. This would also allow for the quick exchange of vehicles, should alternate units ever be implemented (for example, a mecha-soldier)
+# * The unit_objects still require a deletion method, as well. This will be implemented following the inclusion of this revelation regarding the AI/player-class, as they will require deletion simultaneously with
+#their object (more than likely not the player, however, as this would represent significant difficulties for the game as a whole.)
 
 #CURRENT VERSION CHANGES
 # * Checked the integration of the Obstacle class within the MasterSector class, and all seems well - granted this is suspicious in and of itself, and will be regarded with distrust for the forseeable future.
@@ -632,35 +644,7 @@ class Tank():
         elif sprite == 'turret':
             self.turret_sprite.img = self.rotated_turret
             self.turret_sprite.rect = self.rotated_turret_rect
-            self.turret_sprite.mask = self.turret_mask
-
-    
-    def take_damage(self, damage_dict):
-        '''
-        Receives a damage dictionary from a munition object and applies the values in order to adjust the instance's health
-        appropriately.
-
-        damage_dict: {'pen_dmg': int, 'he_dmg': int, 'pen_mod': int, 'he_mod': int}
-        '''
-        current_health = self.health['health']
-        unit_pen_mod = self.health['pen_mod']
-        unit_he_mod = self.health['he_mod']
-
-        pen_dmg = (damage_dict['pen_dmg'] * (1 + (damage_dict['pen_mod'] / 1000)) * (1 - (unit_pen_mod / 1000))) - (unit_pen_mod / 10)
-        if pen_dmg < 0:
-            pen_dmg = 0
-        he_dmg = (damage_dict['he_dmg'] * (1 + (damage_dict['he_mod'] / 1000)) * (1 - (unit_he_mod / 1000))) - (unit_he_mod / 10)
-        if he_dmg < 0:
-            he_dmg = 0
-        total_dmg = pen_dmg + he_dmg
-
-        current_health -= total_dmg
-        if current_health < 0:
-            current_health = 0
-        self.health['health'] = int(current_health)
-
-
-        
+            self.turret_sprite.mask = self.turret_mask     
 
 
     def update_master_sector(self):
@@ -702,6 +686,19 @@ class Tank():
                 self.get_weapon_bounding_points()
                 self.update_sprite('turret')
                 self.update_master_sector()
+
+    
+    def create_health_bar(self):
+        health_surf = pygame.Surface((100, 10))
+        damage_surf = pygame.Surface((100, 10))
+        health_surf.fill((0, 255, 0))
+        damage_surf.fill((255, 0, 0))
+        health_percent = int((self.health['health'] / self.health['max_health']) * 100)
+        health_surf.blit(damage_surf, (health_percent, 0))
+        health_surf_rect = health_surf.get_rect()
+        health_surf_rect.center = self.rotated_chassis_rect.center
+        DISPSURF.blit(health_surf, health_surf_rect)
+
                 
 
             
@@ -754,6 +751,7 @@ class Tank():
         self.check_unit_collision()
         DISPSURF.blit(self.rotated_chassis, self.rotated_chassis_rect)
         DISPSURF.blit(self.rotated_turret, self.rotated_turret_rect)
+        self.create_health_bar()
 
 
     
@@ -954,13 +952,13 @@ class Munition():
         if colliding_unit != None:
             impact_object = self.impact_initiation()
             self.master_sector.add_impact_object(impact_object)
-            self.master_sector.cull_munition(self.allegiance, self.munition_id)
+            self.master_sector.cull_munition(self.munition_id)
             self.master_sector.enact_munition_damage(colliding_unit, self.munition_damage, self.rotated_munition_rect.center)
 
     
     def check_munition_distance(self):
         if self.exceeded_distance == True:
-            self.master_sector.cull_munition(self.allegiance, self.munition_id)
+            self.master_sector.cull_munition(self.munition_id)
 
 
     def generate_munition(self):
@@ -1102,6 +1100,7 @@ class Obstacle():
     def __init__(self, obstacle, obs_pos, degree_val, master_sector):
         self.obs_img = obstacle['img']
         self.obs_pos = obs_pos
+        self.health = obstacle['health']
         self.degree_val = degree_val
         self.rotate_offset = obstacle['rotate_offset']
         self.rotated_obs = self.obs_img
@@ -1282,9 +1281,10 @@ class MasterSector():
         self.unit_objects = {}
         self.turrets = {}
         self.munitions = {}
-        self.munition_objects = []
+        self.munition_objects = {}
         self.impacts = {}
-        self.impact_objects = []
+        self.impact_objects = {}
+        self.artificial_objects = {}
 
 
 
@@ -1334,15 +1334,6 @@ class MasterSector():
     def sector_collision_check_all(self, unit_rect):
         colliding_sectors = [self.sectors[self.sector_keys[key_x]].sector_id for key_x in range(len(self.sector_keys)) if unit_rect.colliderect(self.sectors[self.sector_keys[key_x]].sector_rect) == True]
         return colliding_sectors
-
-
-    def cull_unit_omni(self, unit_id, unit_allegiance):
-        #Must redesign to utilize the units reference of sectors, as opposed to checking sector by sector
-        for x in range(len(self.sector_keys)):
-            key_x = self.sector_keys[x]
-            if unit_id in self.sectors[key_x].unit_dict[unit_allegiance]:
-                self.sectors[key_x].unit_dict[unit_allegiance].remove(unit_id)
-                self.sectors[key_x].unit_list_omni.remove(unit_id)
 
 
     def create_unit(self, unit_id, unit_allegiance, unit_type, unit_dict):
@@ -1395,10 +1386,26 @@ class MasterSector():
 
     
     def instantiate_unit(self, unit_dict):
+        '''
+        Instantiates and houses various unit objects based upon specified type, requiring a passed dictionary appropriate to the unit type being instantiated.
+        '''
         if unit_dict['unit_type'] == 'tank':
             new_unit = Tank(unit_dict['chassis'], unit_dict['turret'], unit_dict['munitions'], unit_dict['ammo'], unit_dict['pos'], unit_dict['allegiance'], self)
             self.unit_objects[new_unit.unit_id] = new_unit
             return new_unit.unit_id
+        elif unit_dict['unit_type'] == 'obstacle': #Obstacle(pine_obs, obs_positions[x][0], obs_positions[x][1], master_sector)
+            new_unit = Obstacle(unit_dict['obstacle'], unit_dict['pos'], unit_dict['degree_val'], self)
+            self.unit_objects[new_unit.unit_id] = new_unit
+            return new_unit.unit_id
+
+    
+    def instantiate_artificial(self, unit_id):
+        '''
+        Instantiates and houses an EnemyAI object, requiring that the corresponding unit-object has already been created. The EnemyAI object, referred to as an artificial, will
+        be housed within the MasterSector.artificial_objects attribute.
+        '''
+        new_artificial = EnemyAI(unit_id, self)
+        self.artificial_objects[new_artificial.unit_id] = new_artificial
 
     
     def create_munition(self, munition_id, unit_id, unit_allegiance, munition_type, munition_dict):
@@ -1432,34 +1439,45 @@ class MasterSector():
                             return unit_i
 
 
-    def cull_unit(self, unit_allegiance, unit_id):
+    def cull_unit(self, unit_id):
         '''
         Culls a unit from any sectors it inhabits, along with the MasterSector.units attribute, as well as the MasterSector.unit_objects attribute, erasing the unit.
         '''
+        unit_allegiance = self.units[unit_id]['allegiance']
         for x in range(len(self.units[unit_id]['sectors'])):
-            self.sectors[self.units[unit_id]['sectors'][x]].remove.unit(unit_allegiance, unit_id)
+            self.sectors[self.units[unit_id]['sectors'][x]].remove_unit(unit_allegiance, unit_id)
         del self.units[unit_id]
         del self.unit_objects[unit_id]
+        if unit_id in self.artificial_objects:
+            self.cull_artificial(unit_id)
 
     
-    def cull_munition(self, unit_allegiance, munition_id):
+    def cull_munition(self, munition_id):
+        '''
+        Culls a munition object from any sectors it inhabits, along with the MasterSector.munitions attribute, as well as the MasterSector.munition_objects attribute, erasing the munition.
+        '''
+        unit_allegiance = self.munitions[munition_id]['allegiance']
         for x in range(len(self.munitions[munition_id]['sectors'])):
             self.sectors[self.munitions[munition_id]['sectors'][x]].remove_munition(unit_allegiance, munition_id)
         del self.munitions[munition_id]
-        for x in range(len(self.munition_objects)):
-            if self.munition_objects[x].munition_id == munition_id:
-                del self.munition_objects[x]
-                break
+        del self.munition_objects[munition_id]
 
     
     def cull_impact(self, impact_id):
+        '''
+        Culls an impact object from any sectors it inhabits, along with the MasterSector.impacts attribute, as well as the MasterSector.impact_objects attribute, erasing the impact.
+        '''
         for x in range(len(self.impacts[impact_id]['sectors'])):
             self.sectors[self.impacts[impact_id]['sectors'][x]].remove_impact(impact_id)
         del self.impacts[impact_id]
-        for x in range(len(self.impact_objects)):
-            if self.impact_objects[x].impact_id == impact_id:
-                del self.impact_objects[x]
-                break
+        del self.impact_objects[impact_id]
+        
+    
+    def cull_artificial(self, unit_id):
+        '''
+        Culls an artificial object from the MasterSector.artificial_objects attribute.
+        '''
+        del self.artificial_objects[unit_id]
     
 
 
@@ -1589,25 +1607,25 @@ class MasterSector():
         return sectors_occupied
 
     
-    def add_unit_object(self, unit_id, unit_object):
+    def add_unit_object(self, unit_object):
         '''
         Adds a unit object into the MasterSector.unit_objects attribute to allow for proper generation and control.
         '''
-        self.unit_objects[unit_id] = unit_object
+        self.unit_objects[unit_object.unit_id] = unit_object
 
     
     def add_munition_object(self, munition_object):
         '''
         Adds a munition object spawned by a unit into the MasterSector.munition_objects attribute to allow for proper generation and control.
         '''
-        self.munition_objects.append(munition_object)
+        self.munition_objects[munition_object.munition_id] = munition_object
 
 
     def add_impact_object(self, impact_object):
         '''
         Adds an impact object spawned by a munition into the MasterSector.impact_objects attribute to allow for proper generation and control.
         '''
-        self.impact_objects.append(impact_object)
+        self.impact_objects[impact_object.impact_id] = impact_object
 
     
     def generate_units(self):
@@ -1626,9 +1644,9 @@ class MasterSector():
         '''
         Generates the various munition objects housed within the MasterSector munition_objects attribute.
         '''
-        generated_munitions_list = [self.munition_objects[x] for x in range(len(self.munition_objects))]
+        generated_munitions_list = list(self.munition_objects.keys())
         for x in range(len(generated_munitions_list)):
-            munition_x = generated_munitions_list[x]
+            munition_x = self.munition_objects[generated_munitions_list[x]]
             munition_x.generate_munition()
         generated_munitions_list = None
 
@@ -1637,11 +1655,22 @@ class MasterSector():
         '''
         Generates the various impact objects housed within the MasterSector impact_objects attribute.
         '''
-        generated_impacts_list = [self.impact_objects[x] for x in range(len(self.impact_objects))]
+        generated_impacts_list = list(self.impact_objects.keys())
         for x in range(len(generated_impacts_list)):
-            impact_x = generated_impacts_list[x]
+            impact_x = self.impact_objects[generated_impacts_list[x]]
             impact_x.generate_impact()
         generated_impacts_list = None
+
+    
+    def generate_artificials(self):
+        '''
+        Generates the various artificial objects housed within the MasterSector artificial_objects attribute.
+        '''
+        generated_artificials_list = list(self.artificial_objects.keys())
+        for x in range(len(artificial_objects_list)):
+            artificial_x = self.artificial_objects[generated_artificials_list[x]]
+            artificial_x.operations_management()
+        generated_artificials_list = None
 
     
     def enact_munition_damage(self, colliding_unit, damage_dict, collision_pos):
@@ -1651,15 +1680,53 @@ class MasterSector():
         damage, if any, and provides the damage_dict to those affected units as well, ensuring not to cause the colliding_unit to
         render damage twice.
         '''
-        print(self.units[colliding_unit])
-        self.unit_objects[colliding_unit].take_damage(damage_dict['direct'])
-        print(self.unit_objects[colliding_unit].health['health'])
-        if damage_dict['area'] != None and damage_dict['area'] == None: #impossible conditional, remove second condition to reemploy code.
-            radius = damage_dict['area']['dist']
-            damage_rect = pygame.Rect(collision_pos[0] - radius, collision_pos[1] - radius, radius * 2, radius * 2)
-            damage_sectors = self.sector_point_collision_omni(damage_rect)
-            unit_list_omni = [self.sectors[damage_sectors[x]].unit_list_omni[i] for i in range(len(self.sectors[damage_sectors[x]].unit_list_omni)) for x in range(len(damage_sectors))]
-            
+        self.administer_unit_damage(colliding_unit, damage_dict['direct'])
+        if damage_dict['area'] != None:
+            damage_dict['area']['sprite'].rect.center = collision_pos
+            damage_sectors = self.sector_point_collision_omni(damage_dict['area']['sprite'].rect)
+            area_list_omni = list(set([self.sectors[damage_sectors[x]].unit_list_omni[i] for x in range(len(damage_sectors)) for i in range(len(self.sectors[damage_sectors[x]].unit_list_omni)) if self.sectors[damage_sectors[x]].unit_list_omni[i] != colliding_unit]))
+            for x in range(len(area_list_omni)):
+                rect_collide = damage_dict['area']['sprite'].rect.colliderect(self.units[area_list_omni[x]]['unit_rect'])
+                if rect_collide == True:
+                    sprite_collide = pygame.sprite.collide_mask(damage_dict['area']['sprite'], self.units[area_list_omni[x]]['unit_sprite'])
+                    if sprite_collide != None:
+                        self.administer_unit_damage(area_list_omni[x], damage_dict['area'])
+
+    
+    def administer_unit_damage(self, unit_id, damage_dict):
+        '''
+        Receives a damage dictionary from a munition object and applies the values in order to adjust the unit instance's health
+        appropriately.
+        '''
+        if self.unit_objects[unit_id].health['mortal'] == False:
+            return None
+
+        current_health = self.unit_objects[unit_id].health['health']
+        unit_pen_mod = self.unit_objects[unit_id].health['pen_mod']
+        unit_he_mod = self.unit_objects[unit_id].health['he_mod']
+
+        pen_dmg = (damage_dict['pen_dmg'] * (1 + (damage_dict['pen_mod'] / 1000)) * (1 - (unit_pen_mod / 1000))) - (unit_pen_mod / 10)
+        if pen_dmg < 0:
+            pen_dmg = 0
+        he_dmg = (damage_dict['he_dmg'] * (1 + (damage_dict['he_mod'] / 1000)) * (1 - (unit_he_mod / 1000))) - (unit_he_mod / 10)
+        if he_dmg < 0:
+            he_dmg = 0
+        total_dmg = pen_dmg + he_dmg
+
+        current_health -= total_dmg
+        if current_health < 0:
+            current_health = 0
+        self.unit_objects[unit_id].health['health'] = int(current_health)
+        self.check_unit_health(unit_id)
+
+    
+    def check_unit_health(self, unit_id):
+        health = self.unit_objects[unit_id].health['health']
+        if health <= 0:
+            self.cull_unit(unit_id)
+            if unit_id in self.artificial_objects:
+                self.cull_artificial(unit_id)
+                    
 
 
 
@@ -3377,8 +3444,23 @@ def vec2int(v):
 
 def int2vec(i):
     return pygame.math.Vector2(i)
-    
 
+
+def create_circle_sprite(radius):
+    '''
+    Receives an int(radius) and returns a pygame Surface object with a circle of the radius and 1 pixel width blitted onto the center.
+    '''
+    radius = int(radius)
+    img_surface = pygame.Surface((radius * 2, radius * 2), SRCALPHA)
+    img_rect = img_surface.get_rect()
+    pygame.draw.circle(img_surface, (0, 0, 0), img_rect.center, radius, 1)
+    img_mask = pygame.mask.from_surface(img_surface)
+
+
+    radius_sprite = gameSprite(img_surface, img_rect, img_mask)
+    return radius_sprite
+
+    
 
 def circle_line_intersect(circle, point_a, point_b):
     #Code pilfered from Stackoverflow (or liberated)
@@ -3528,9 +3610,9 @@ def main():
                         'node_distance': 100, 'bounding_offsets': [(43, -30), (43, 30), (-45, -30), (-45, 30)],
                         'health': {'mortal': True, 'max_health': 1200, 'health': 1200, 'pen_mod': 450, 'he_mod': 210}}
     
-    standard_shell = {'img': standard_shell_img, 'munition_type': 'standard_shell', 'munition_move_speed': 21, 'maximum_distance': 2000, 'designation': 'primary', 'munition_offset': (10, 0), 'degree_variance': 0, 'firing_rate': 1, 'round_capacity': 1, 'maximum_ammo': 30, 'initial_ammo': 15, 'reload_time_ms': 2000, 'impact': explosion_large_shockwave_impact, 'damage': {'direct': {'pen_dmg': 150, 'he_dmg': 300, 'pen_mod': 50, 'he_mod': 200}, 'area': {'pen_dmg': 0, 'he_dmg': 150, 'pen_mod': 0, 'he_mod': 100, 'dist': 50}}}
+    standard_shell = {'img': standard_shell_img, 'munition_type': 'standard_shell', 'munition_move_speed': 21, 'maximum_distance': 2000, 'designation': 'primary', 'munition_offset': (10, 0), 'degree_variance': 0, 'firing_rate': 1, 'round_capacity': 1, 'maximum_ammo': 30, 'initial_ammo': 15, 'reload_time_ms': 2000, 'impact': explosion_large_shockwave_impact, 'damage': {'direct': {'pen_dmg': 150, 'he_dmg': 300, 'pen_mod': 50, 'he_mod': 200}, 'area': {'pen_dmg': 0, 'he_dmg': 150, 'pen_mod': 0, 'he_mod': 100, 'dist': 75, 'sprite': create_circle_sprite(75)}}}
 
-    fortyfour_mm_round = {'img': fortyfour_mm_round_img.convert_alpha(), 'munition_type': 'fortyfour_mm_round', 'munition_move_speed': 44, 'maximum_distance': 1250, 'designation': 'secondary', 'munition_offset': (5, 0), 'degree_variance': 3, 'firing_rate': 50, 'round_capacity': 100, 'maximum_ammo': 2000, 'initial_ammo': 1000, 'reload_time_ms': 1500, 'impact': explosion_mini_impact, 'damage': {'direct': {'pen_dmg': 80, 'he_dmg': 27, 'pen_mod': 50, 'he_mod': 160}, 'area': None}}
+    fortyfour_mm_round = {'img': fortyfour_mm_round_img.convert_alpha(), 'munition_type': 'fortyfour_mm_round', 'munition_move_speed': 44, 'maximum_distance': 1250, 'designation': 'secondary', 'munition_offset': (5, 0), 'degree_variance': 3, 'firing_rate': 50, 'round_capacity': 75, 'maximum_ammo': 2000, 'initial_ammo': 1000, 'reload_time_ms': 1500, 'impact': explosion_mini_impact, 'damage': {'direct': {'pen_dmg': 80, 'he_dmg': 0, 'pen_mod': 50, 'he_mod': 0}, 'area': None}}
     
     #Obs Sprite Variables
     pine_obs = {'img': pine_tree_img, 'rotate_offset': (44, 0), 'bounding_offsets': [(50, -50), (50, 50), (-50, -50), (-50, 50)], 'health': {'mortal': False}}
@@ -3558,7 +3640,7 @@ def main():
     e_chassis_turn_speed = 2
     e_turret_rotation_speed = 3
     e_chassis_direction = {'turn': None, 'move': None}
-    e_chassis_pos = (300, 350)
+    e_chassis_pos = (600, 400)
     desired_pos = None
 
     enemy_tank_turret = turret_generator(base_turret, [standard_barrel])
@@ -3566,23 +3648,20 @@ def main():
     enemyTank_dict = {'unit_type': 'tank', 'chassis': standard_chassis, 'turret': enemy_tank_turret, 'munitions': [standard_shell], 'ammo': {'standard_shell': 15}, 'pos': e_chassis_pos, 'allegiance': 'ENEMY'}
     enemyTank_id = master_sector.instantiate_unit(enemyTank_dict)
     enemyTank = master_sector.unit_objects[enemyTank_id]
+    master_sector.instantiate_artificial(enemyTank_id)
+    artificial_enemy = master_sector.artificial_objects[enemyTank_id]
 
 
-    artificial_enemy = EnemyAI(enemyTank_id, master_sector)
     artificial_enemy.tank.generate_tank(DISPSURF)
 
     enemy_chassis2 = dict(standard_chassis)
     enemy_tank_turret2 = dict(enemy_tank_turret)
-    #enemyTank2 = Tank(enemy_chassis2, enemy_tank_turret2, [standard_shell], {}, (500, 300), 'ENEMY', master_sector)
-    #artificial_enemy2 = EnemyAI(enemyTank2, master_sector)
 
-    #print(playerTank.unit_id)
-    #print(artificial_enemy.tank.unit_id)
     
 
     #AuxiliaryTank variables
     aux_tanks = []
-    aux_positions = [(500, 300)] #[(200, 450), (625, 350), (800, 450), (500, 300), (75, 100), (575, 75), (925, 75), (900, 575), (60, 500)]
+    aux_positions = [] #[(500, 300)] #[(200, 450), (625, 350), (800, 450), (500, 300), (75, 100), (575, 75), (925, 75), (900, 575), (60, 500)]
     for x in range(len(aux_positions)):
         #aux_tank = Tank(enemy_chassis2, enemy_tank_turret2, [standard_shell], {}, aux_positions[x], 'ENEMY', master_sector)
         #aux_tanks.append(aux_tank)
@@ -3593,14 +3672,15 @@ def main():
 
     aux_enemies = []
     for x in range(len(aux_tanks)):
-        enemy_ai = EnemyAI(aux_tanks[x], master_sector)
-        aux_enemies.append(enemy_ai)
+        master_sector.instantiate_artificial(aux_tanks[x])
+        aux_enemies.append(aux_tanks[x])
 
     #Obstacle variables
     obs_omni = []
-    obs_positions = [((100, 300), 0)]
+    obs_positions = [((300, 250), 0)]
     for x in range(len(obs_positions)):
-        obs_x = Obstacle(pine_obs, obs_positions[x][0], obs_positions[x][1], master_sector)
+        obs_x_dict = {'unit_type': 'obstacle', 'obstacle': pine_obs, 'pos': obs_positions[x][0], 'degree_val': obs_positions[x][1]}
+        obs_x = master_sector.instantiate_unit(obs_x_dict)
         obs_omni.append(obs_x)
     
     
@@ -3626,9 +3706,10 @@ def main():
             elif event.type == MOUSEMOTION:
                 mouse['mouse_x'], mouse['mouse_y'] = event.pos
                 master_sector.unit_objects[playerTank_id].update_target_via_mouse(mouse)
-                #enemyTank.update_target_via_mouse(mouse)
+                artificial_enemy.tank.update_target_via_mouse(mouse)
                 for x in range(len(aux_enemies)):
-                    aux_enemies[x].tank.update_target_via_mouse(mouse)
+                    if aux_enemies[x] in master_sector.artificial_objects:
+                        master_sector.artificial_objects[aux_enemies[x]].tank.update_target_via_mouse(mouse)
             elif event.type == MOUSEBUTTONDOWN:
                 if event.button == 1:
                     weapon_firing['primary'] = True
@@ -3699,11 +3780,6 @@ def main():
 
         if artificial_enemy.path_info['path'] != None:
             artificial_enemy.draw_path()
-
-        for x in range(len(obstacle_list)):
-            pygame.draw.rect(DISPSURF, (0, 0, 0), obstacle_list[x])
-
-
         
         master_sector.unit_objects[playerTank_id].generate_tank(DISPSURF)
 
@@ -3711,19 +3787,20 @@ def main():
         artificial_enemy.tank.generate_tank(DISPSURF)
 
         for x in range(len(obs_omni)):
-            obs_omni[x].generate_obs()
-            for i in range(len(obs_omni[x].bounding_points)):
-                pygame.draw.circle(DISPSURF, (0, 255, 255), obs_omni[x].bounding_points[i], 3, 0)
-            pygame.draw.aaline(DISPSURF, (255, 0, 0), obs_x.bounding_points[0], obs_x.bounding_points[1], True)
-            pygame.draw.aaline(DISPSURF, (255, 0, 0), obs_x.bounding_points[0], obs_x.bounding_points[2], True)
-            pygame.draw.aaline(DISPSURF, (255, 0, 0), obs_x.bounding_points[1], obs_x.bounding_points[3], True)
-            pygame.draw.aaline(DISPSURF, (255, 0, 0), obs_x.bounding_points[2], obs_x.bounding_points[3], True)
+            master_sector.unit_objects[obs_omni[x]].generate_obs()
+            for i in range(len(master_sector.unit_objects[obs_omni[x]].bounding_points)):
+                pygame.draw.circle(DISPSURF, (0, 255, 255), master_sector.unit_objects[obs_omni[x]].bounding_points[i], 3, 0)
+            pygame.draw.aaline(DISPSURF, (255, 0, 0), master_sector.unit_objects[obs_omni[x]].bounding_points[0], master_sector.unit_objects[obs_omni[x]].bounding_points[1], True)
+            pygame.draw.aaline(DISPSURF, (255, 0, 0), master_sector.unit_objects[obs_omni[x]].bounding_points[0], master_sector.unit_objects[obs_omni[x]].bounding_points[2], True)
+            pygame.draw.aaline(DISPSURF, (255, 0, 0), master_sector.unit_objects[obs_omni[x]].bounding_points[1], master_sector.unit_objects[obs_omni[x]].bounding_points[3], True)
+            pygame.draw.aaline(DISPSURF, (255, 0, 0), master_sector.unit_objects[obs_omni[x]].bounding_points[2], master_sector.unit_objects[obs_omni[x]].bounding_points[3], True)
 
 
         #aux_enemies operations management
         for x in range(len(aux_enemies)):
-            aux_enemies[x].operations_management()
-            aux_enemies[x].tank.generate_tank(DISPSURF)
+            if aux_enemies[x] in master_sector.artificial_objects:
+                master_sector.artificial_objects[aux_enemies[x]].operations_management()
+                master_sector.artificial_objects[aux_enemies[x]].tank.generate_tank(DISPSURF)
 
         master_sector.generate_munitions()
         master_sector.generate_impacts()
@@ -3775,36 +3852,37 @@ def main():
 
             
 
-##        #ENEMY_1 FOV
-##
-    # pygame.draw.polygon(DISPSURF, (255, 0, 0), [artificial_enemy.tank.chassis_turret_pos, artificial_enemy.fov_deltoid['a']['pos'], artificial_enemy.fov_deltoid['c']['pos'], artificial_enemy.fov_deltoid['b']['pos'], artificial_enemy.tank.chassis_turret_pos], 1)
-    # pygame.draw.rect(DISPSURF, (0, 255, 255), artificial_enemy.fov_rect, 1)
-    
-    # if artificial_enemy.fov_unit_stats != False:
-    #     for x in range(len(artificial_enemy.fov_unit_keys)):
-    #         fov_x = artificial_enemy.fov_unit_stats[artificial_enemy.fov_unit_keys[x]]
-    #         if fov_x['center'][1] == True:
-    #             pygame.draw.circle(DISPSURF, (0, 255, 0), fov_x['center'][0], 3, 0)
-    #         for i in range(len(fov_x['bounding_points'])):
-    #             if fov_x['bounding_points'][i][1] == True:
-    #                 pygame.draw.circle(DISPSURF, (0, 255, 0), fov_x['bounding_points'][i][0], 3, 0)
+       #ENEMY_1 FOV
 
-    # for x in range(len(aux_enemies)):
-    #     if aux_enemies[x].tank.unit_id in artificial_enemy.fov_unit_stats:
-    #         pygame.draw.aaline(DISPSURF, (0, 255, 0), artificial_enemy.fov_unit_stats[aux_enemies[x].tank.unit_id]['los_points']['counterclock'], artificial_enemy.fov_unit_stats[aux_enemies[x].tank.unit_id]['los_points']['clockwise'], True)
+        pygame.draw.polygon(DISPSURF, (255, 0, 0), [artificial_enemy.tank.chassis_turret_pos, artificial_enemy.fov_deltoid['a']['pos'], artificial_enemy.fov_deltoid['c']['pos'], artificial_enemy.fov_deltoid['b']['pos'], artificial_enemy.tank.chassis_turret_pos], 1)
+        pygame.draw.rect(DISPSURF, (0, 255, 255), artificial_enemy.fov_rect, 1)
+        
+        if artificial_enemy.fov_unit_stats != False:
+            for x in range(len(artificial_enemy.fov_unit_keys)):
+                fov_x = artificial_enemy.fov_unit_stats[artificial_enemy.fov_unit_keys[x]]
+                if fov_x['center'][1] == True:
+                    pygame.draw.circle(DISPSURF, (0, 255, 0), fov_x['center'][0], 3, 0)
+                for i in range(len(fov_x['bounding_points'])):
+                    if fov_x['bounding_points'][i][1] == True:
+                        pygame.draw.circle(DISPSURF, (0, 255, 0), fov_x['bounding_points'][i][0], 3, 0)
+
+            for x in range(len(aux_enemies)):
+                if master_sector.artificial_objects[aux_enemies[x]].tank.unit_id in artificial_enemy.fov_unit_stats:
+                    aux_x = master_sector.artificial_objects[aux_enemies[x]]
+                    pygame.draw.aaline(DISPSURF, (0, 255, 0), artificial_enemy.fov_unit_stats[aux_x.tank.unit_id]['los_points']['counterclock'], artificial_enemy.fov_unit_stats[aux_x.tank.unit_id]['los_points']['clockwise'], True)
 
 
-    # if playerTank.unit_id in artificial_enemy.currently_sighted['keys']:
-    #     red = (255, 0, 0)
-    #     cyan = (0, 255, 255)
-    #     for x in range(len(['c', 'a', 'b'])):
-    #         chosen_pos = ['c', 'a', 'b'][x]
-    #         if artificial_enemy.currently_sighted['units'][playerTank.unit_id][chosen_pos][2] == True:
-    #             line_color = cyan
-    #         else:
-    #             line_color = red
-    #         pygame.draw.circle(DISPSURF, line_color, artificial_enemy.currently_sighted['units'][playerTank.unit_id][chosen_pos][0], 3, 0)
-    #         pygame.draw.aaline(DISPSURF, line_color, artificial_enemy.currently_sighted['units'][playerTank.unit_id][chosen_pos][0], artificial_enemy.fov_deltoid['origin']['pos'], True)
+            if playerTank_id in artificial_enemy.currently_sighted['keys']:
+                red = (255, 0, 0)
+                cyan = (0, 255, 255)
+                for x in range(len(['c', 'a', 'b'])):
+                    chosen_pos = ['c', 'a', 'b'][x]
+                    if artificial_enemy.currently_sighted['units'][playerTank_id][chosen_pos][2] == True:
+                        line_color = cyan
+                    else:
+                        line_color = red
+                    pygame.draw.circle(DISPSURF, line_color, artificial_enemy.currently_sighted['units'][playerTank_id][chosen_pos][0], 3, 0)
+                    pygame.draw.aaline(DISPSURF, line_color, artificial_enemy.currently_sighted['units'][playerTank_id][chosen_pos][0], artificial_enemy.fov_deltoid['origin']['pos'], True)
 
 ##
 ##        
