@@ -495,7 +495,21 @@ def create_node_map(node_distance):
     return NodeMap
 
 
-def begin_node_check(obstacle_rects, node_distance):     
+def create_map_foreign(node_list):
+    NodeMap = OmniNodes(node_list)
+    return NodeMap
+
+
+def test_nodes_foreign(nodes_list_omni, obstacle_rects, node_distance):
+    tested_nodes = {}
+    for x in range(len(nodes_list_omni)):
+        tested_nodes_new = nodes_list_omni[x].locate_neighbors(obstacle_rects, tested_nodes)
+        for i in range(len(tested_nodes_new)):
+            tested_nodes[tested_nodes_new[i]['nodes']] = [tested_nodes_new[i]['viable'], tested_nodes_new[i]['node_points'], tested_nodes_new[i]['cost']]
+    return tested_nodes
+
+
+def begin_node_check(obstacle_rects, node_distance=100):     
     list_of_nodes = generate_nodes(node_distance)
 
     tested_nodes = {}
@@ -546,6 +560,21 @@ def obstacle_remover(position, obstacle_rects):
         if obstacle_rects[x].collidepoint(position) == False:
             new_obstacle_list.append(((obstacle_rects[x].x, obstacle_rects[x].y), obstacle_rects[x].w, obstacle_rects[x].h))
     return new_obstacle_list
+
+
+def generate_graph_and_map_foreign(obstacle_rects, node_list, node_distance=100):
+    node_distance = abs(node_distance)
+    if node_distance == 1 or node_distance == 0:
+        node_distance = 100
+    elif node_distance % 2 != 0:
+        node_distance += 1
+    
+    tested_nodes = test_nodes_foreign(node_list, obstacle_rects, node_distance)
+    graph = create_map_foreign(node_list)
+    graph.cull_nodes_omni(obstacle_rects)
+    tested_nodes = remove_bad_tested_nodes_connections(tested_nodes, graph)
+
+    return graph, tested_nodes
 
 
 def generate_graph_and_map(obstacle_rects, node_distance=40):
@@ -636,13 +665,14 @@ def a_star_search(graph, start, end, obstacle_rects, tested_nodes):
 
         for next in graph.find_neighbors(current, obstacle_rects):
             next = graph.retrieve_node(next)
-            next_cost = cost[current.center] + graph.get_cost(current, next)
+            if next != None:
+                next_cost = cost[current.center] + graph.get_cost(current, next)
 
-            if next.center not in cost or next_cost < cost[next.center]:     
-                cost[next.center] = next_cost
-                priority = next_cost + heuristic(vec(end.center), vec(next.center), current.node_distance)
-                frontier.put(next.center, priority)
-                path[next.center] = vec(current.center) - vec(next.center)
+                if next.center not in cost or next_cost < cost[next.center]:     
+                    cost[next.center] = next_cost
+                    priority = next_cost + heuristic(vec(end.center), vec(next.center), current.node_distance)
+                    frontier.put(next.center, priority)
+                    path[next.center] = vec(current.center) - vec(next.center)
         
         if current == end:
             goal_found = True
@@ -678,10 +708,38 @@ def a_star_search(graph, start, end, obstacle_rects, tested_nodes):
 
 
 
-
+def generate_foreign_path(node_list_omni, node_distance, obstacle_rects, start_pos, goal_pos):
+    '''
+    Receives input from a foreign module and returns a path from the start_pos to the goal_pos, ensuring to account for obstacles from the start_pos to the goal_pos.
+    Requires a previously generated node_list and a list of obstacle_rects that may obstruct pathfinding, a start_pos and a goal_pos.
+    '''
     
+    Start = SpecialNode((0, 255, 255), start_pos[0], start_pos[1], node_distance)
+    Goal = SpecialNode((255, 0, 255), goal_pos[0], goal_pos[1], node_distance)
 
+    print(Start)
+    print(Goal)
 
+    graph, tested_nodes = generate_graph_and_map_foreign(obstacle_rects, node_list_omni, node_distance)
+
+    Start.locate_neighbors(graph, obstacle_rects)
+    Start.evaluate_connections(obstacle_rects)
+    Goal.locate_neighbors(graph, obstacle_rects)
+    Goal.evaluate_connections(obstacle_rects)
+
+    closest_node_start = Start.closest_node['node']
+    closest_node_start = graph.retrieve_node(closest_node_start)
+    closest_node_goal = Goal.closest_node['node']
+    closest_node_goal = graph.retrieve_node(closest_node_goal)
+
+    print(closest_node_start)
+    print(closest_node_goal)
+
+    path, cost, graph = a_star_search(graph, closest_node_start, closest_node_goal, obstacle_rects, tested_nodes)
+
+    path_info = {'graph': graph, 'path': path, 'start': Start, 'goal': Goal, 'closest_node_start': closest_node_start, 'closest_node_goal': closest_node_goal, 'tested_nodes': tested_nodes}
+
+    return path_info
 
 
 
