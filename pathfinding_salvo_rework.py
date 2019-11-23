@@ -215,6 +215,7 @@ class Node():
         pygame.draw.circle(DISPSURF, color, (self.x_pos, self.y_pos), 3, 0)
 
 
+
 class SpecialNode(Node):
     def __init__(self, color, x_pos, y_pos, node_distance):
 
@@ -339,28 +340,26 @@ class OmniNodes():
         target_node = self.retrieve_node(target_node_pos)
         not_checked = target_node.check_if_not_previously_checked()
         return not_checked
-    
-
-        
-        
 
 
 
-
-def generate_nodes(node_distance=40):
+def generate_nodes(node_distance=40, node_area=(WINDOWWIDTH, WINDOWHEIGHT)):
 
     nodes_omni = []
 
+    node_area_width = node_area[0]
+    node_area_height = node_area[1]
+
     modifier = int(node_distance / 2)
 
-    total_nodes_width = int(WINDOWWIDTH / node_distance)
-    total_nodes_height = int(WINDOWHEIGHT / int(node_distance / 2))
+    total_nodes_width = int(node_area_width / node_distance)
+    total_nodes_height = int(node_area_height / int(node_distance / 2))
 
     for x in range(1, total_nodes_height + 1):
-        if x * int(node_distance / 2) >= WINDOWHEIGHT:
+        if x * int(node_distance / 2) >= node_area_height:
             break
         for i in range(total_nodes_width + 1):
-            if i * node_distance + modifier >= WINDOWWIDTH:
+            if i * node_distance + modifier >= node_area_width:
                 break
             new_node = (i * node_distance + modifier, x * int(node_distance / 2))
             if new_node[0] != 0:
