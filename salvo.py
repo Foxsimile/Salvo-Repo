@@ -1,9 +1,13 @@
 # Salvo
-# v0_9_6_9zl
+# v0_9_6_9zo
 
 #Notes To Self
 
-#SIGN OFF NOTES:
+#SIGN OFF NOTES: 11/18/19-9:25am
+# * Must continue creation and development of the chassis_fov movement system to provide collision avoidance and basic pathfinding capability, as well as include
+#more detailed obstacle/obstruction avoidance for pathfinding should the chassis_fov prove insufficient.
+# * Must complete LOS-FOV operations for target-pathfinding around obstacles, as currently it requires a checking system to ensure that the pathfinding provided
+#is still accurate (i.e that no points on the path are blocked) and a system to deal with such an occurence.
 
 
 #CURRENT VERSION CHANGES
@@ -1197,7 +1201,7 @@ class Obstacle():
 #-----------------------------------Sector CLass
 class Sector():
     def __init__(self, sector_rect):
-        self.sector_rect = sector_rect
+        self.sector_rect = pygame.Rect(sector_rect)
         self.sector_id = next(SECTOR_ID)
         self.unit_dict = {'PLAYER': [], 'ENEMY': [], 'ROGUE': [], 'OBSTACLE': []}
         self.unit_list_omni = []
@@ -1205,10 +1209,15 @@ class Sector():
         self.munition_dict = {'PLAYER': [], 'ENEMY': [], 'ROGUE': []}
         self.munition_list_omni = []
         self.impact_list_omni = []
-
+        self.sector_nodes = []
 
     def check_if_contained(self, unit_rect):
         containment = self.sector_rect.contains(unit_rect)
+        return containment
+
+    
+    def check_if_point_contained(self, point):
+        containment = self.sector_rect.collidepoint(point)
         return containment
 
 
@@ -1267,6 +1276,7 @@ class MasterSector():
         self.sector_info = None
         self.sectors = self.generate_sectors()
         self.sector_keys = self.get_sector_keys()
+        self.sector_node_generation()
         self.units = {}
         self.unit_objects = {}
         self.turrets = {}
@@ -1324,6 +1334,16 @@ class MasterSector():
     def sector_collision_check_all(self, unit_rect):
         colliding_sectors = [self.sectors[self.sector_keys[key_x]].sector_id for key_x in range(len(self.sector_keys)) if unit_rect.colliderect(self.sectors[self.sector_keys[key_x]].sector_rect) == True]
         return colliding_sectors
+
+    
+    def sector_node_generation(self):
+        node_list_omni = pathfinding_salvo_rework.generate_nodes(100, (WINDOWWIDTH, WINDOWHEIGHT))
+
+        for x in range(len(node_list_omni)):
+            for i in range(len(self.sector_keys)):
+                if self.sectors[self.sector_keys[i]].check_if_point_contained((node_list_omni[x].x_pos, node_list_omni[x].y_pos)) == True:
+                    self.sectors[self.sector_keys[i]].sector_nodes.append(node_list_omni[x])
+
 
 
     def create_unit(self, unit_id, unit_allegiance, unit_type, unit_dict):
@@ -1619,6 +1639,28 @@ class MasterSector():
         return unit_fov
 
 
+    def create_fov_deltoid(self, origin_point, degree_val, degree_range, fov_distance):
+        '''
+        Creates an FOV-deltoid composed of an origin-point, a counter-clockwise-point, a clockwise-point and a center-point. Requires an origin-point,
+        a degree-orientation, a degree_range that the deltoid should adhere to and the distance the FOV points are to be projected.
+        '''
+        degree_val_a = degree_val + degree_range / 2 #clockwise
+        degree_val_b = degree_val - degree_range / 2 #counterclock
+        degree_val_c = degree_val
+
+        deltoid_velocity_a = pygame.math.Vector2(1, 0).rotate(degree_val_a) * fov_distance
+        deltoid_velocity_b = pygame.math.Vector2(1, 0).rotate(degree_val_b) * fov_distance
+        deltoid_velocity_c = pygame.math.Vector2(1, 0).rotate(degree_val_c) * fov_distance
+        deltoid_pos_a = origin_point + deltoid_velocity_a
+        deltoid_pos_b = origin_point + deltoid_velocity_b
+        deltoid_pos_c = origin_point + deltoid_velocity_c
+
+        fov_info = {'a': {'degree_val': degree_val_a, 'velocity': deltoid_velocity_a, 'pos': (int(deltoid_pos_a[0]), int(deltoid_pos_a[1]))},
+                    'b': {'degree_val': degree_val_b, 'velocity': deltoid_velocity_b, 'pos': (int(deltoid_pos_b[0]), int(deltoid_pos_b[1]))},
+                    'c': {'degree_val': degree_val_c, 'velocity': deltoid_velocity_c, 'pos': (int(deltoid_pos_c[0]), int(deltoid_pos_c[1]))},
+                    'origin': {'degree_val': degree_val, 'pos': origin_point},
+                    'stats': {'distance': fov_distance, 'range': degree_range}}
+        return fov_info
 
 
     def determine_target_unit_fov_deltoid(self, unit_id, origin_point):
@@ -2603,7 +2645,12 @@ class Artificial():
         self.currently_visible_units = []
         self.obscured_units = {}
         self.desired_aim = (0, 0)
-        self.combat_stats = {'state': 'idle', 'target': {'unit_id': None, 'pos': None, 'dist': None, 'visible': None}, 'weapons': {'firing': {'primary': False, 'secondary': False, 'tertiary': False}, 'weapon_info': self.decipher_weapon_stats()}}
+        self.combat_stats = {'state': 'idle', 'target': {'unit_id': None, 'pos': None, 'dist': None, 'visible': None}, 
+        'weapons': {'firing': {'primary': False, 'secondary': False, 'tertiary': False}, 'weapon_info': self.decipher_weapon_stats()},
+        'pathfinding': {'path': {}, 'goal_node': None}}
+        self.movement_stats = {'chassis_focus': {'origin_a': None, 'origin_b': None, 'bounding_points': None, 'bounding_connections': None, 'stats': {'distance': 400}}, 
+        'chassis_fov': {'a': {'degree_val': None, 'velocity': None, 'pos': None}, 'b': {'degree_val': None, 'velocity': None, 'pos': None}, 'c': {'degree_val': None, 'velocity': None, 'pos': None}, 'origin': {'degree_val': None, 'pos': None}, 'stats': {'distance': 200, 'range': 120}}}
+
 
         # self.focal_point = None #DELETE ME EVENTUALLY MAYBE UNLESS I BECOME USEFUL
         # self.furthest_points_delete_me = [] #HEY I JUST MET YOU AND THIS IS CRAZY BUT IM SO USELESS DELETE ME MAYBE
@@ -3223,7 +3270,7 @@ class Artificial():
         #May require dumbing down, as the generation of bounding-boxes, bounding-connections and performing bounding-box collision checks on them against all units within shared sectors
         #may be too resource intensive, considering it must be performed once for each bounding-point. A simple radial check may be more efficient.
         #Still requires the determination of the appropriate path to follow, now that the bounding-points have been determined.
-        obscuring_units = self.obscured_units[unit_id]
+        obscuring_units = [self.obscured_units[unit_id][x] for x in range(len(self.obscured_units[unit_id])) if self.master_sector.units[self.obscured_units[unit_id][x]]['unit_type'] == 'obstacle']
         obscuring_units_path_points = {'unit_keys': []}
         node_creation_distance = int(self.tank.node_distance)
         for x in range(len(obscuring_units)):
@@ -3368,60 +3415,142 @@ class Artificial():
                     node_path = counterclock_path
                 if unit_node_path['fov_score'] > node_path['fov_score']:
                     unit_node_path = node_path
-
+        if unit_node_path['valid_path'] == True:
+            path_keys = list(unit_node_path['path'].keys())
+            for x in range(len(path_keys)):
+                pygame.draw.aaline(DISPSURF, (0, 0, 0), path_keys[x], unit_node_path['path'][path_keys[x]], True)
+            pygame.draw.circle(DISPSURF, (0, 0, 0), unit_node_path['goal_node'], 15, 2)
         return unit_node_path
-        # if unit_node_path['valid_path'] == True:
-        #     path_keys = list(unit_node_path['path'].keys())
-        #     for x in range(len(path_keys)):
-        #         pygame.draw.aaline(DISPSURF, (0, 0, 0), path_keys[x], unit_node_path['path'][path_keys[x]], True)
-        #     pygame.draw.circle(DISPSURF, (0, 0, 0), unit_node_path['goal_node'], 15, 2)
-                
-                
-                
-
-
-
-        
-
-
-
-
-
-
-
-        #Possibly the best way to check for succession in the path of nodes is to check the start-node's angle to the end-node (the start node being the node on the obstacle closest to the artificial,
-        #the end-node being the node on the obstacle closest to the target) and check the start-node's angle to the obstacle-center, and then compare the two. There should be significant difference,
-        #as otherwise it would indicate that the node is on the opposite side of the obstacle and cannot be traversed, requiring a middling-node as a half-way point. Or, perhaps, I could simply utilize
-        #the built-in bounding-connections from the unit, which should be the same as those of the nodes generated.
-        #^> Currently highlighted, now, is the proof-of-concept regarding the existing node-connections. It works.
-        # * One development of note is the fact that the nodes should simply be looped over to determine FOV-sight iteratively, and only after determining their sight-status checked in alternating clockwise/counterclock
-        #directions to determine the shortest path.
-
-
 
             
 
     def combat_operations(self):
         #self.set_weapon_firing()
         if self.combat_stats['target']['unit_id'] in self.obscured_units:
-            self.determine_obstacle_node_path(self.combat_stats['target']['unit_id'])
+            obstacle_pathfinding = self.determine_obstacle_node_path(self.combat_stats['target']['unit_id'])
+            self.combat_stats['pathfinding']['path'] = obstacle_pathfinding['path']
+            self.combat_stats['pathfinding']['goal_node'] = obstacle_pathfinding['goal_node']
 
+
+    def create_chassis_focus(self):
+        '''
+        Generates a set of focus_deltoids for the Artificial to utilize for movement control operations.
+        '''
+        focus_sight_dist = self.movement_stats['chassis_focus']['stats']['distance']
+        focus_origin_dist = int(self.tank.node_distance / 2.5)
+        focus_origin_a = pos_from_degrees(self.tank.rotated_chassis_rect.center, self.tank.chassis_degree_val + 90, focus_origin_dist)
+        focus_origin_a = (int(focus_origin_a[0]), int(focus_origin_a[1]))
+        focus_origin_b = pos_from_degrees(self.tank.rotated_chassis_rect.center, self.tank.chassis_degree_val - 90, focus_origin_dist)
+        focus_origin_b = (int(focus_origin_b[0]), int(focus_origin_b[1]))
+
+        focus_point_a = pos_from_degrees(focus_origin_a, self.tank.chassis_degree_val, focus_sight_dist)
+        focus_point_a = (int(focus_point_a[0]), int(focus_point_a[1]))
+        focus_point_b = pos_from_degrees(focus_origin_b, self.tank.chassis_degree_val, focus_sight_dist)
+        focus_point_b = (int(focus_point_b[0]), int(focus_point_b[1]))
+
+        focus_points_omni = [focus_origin_a, focus_origin_b, focus_point_a, focus_point_b]
+        for x in range(len(focus_points_omni)):
+            pygame.draw.circle(DISPSURF, (255, 0, 255), focus_points_omni[x], 3, 0)
+            if x < 2:
+                pygame.draw.aaline(DISPSURF, (255, 0, 255), focus_points_omni[x], focus_points_omni[-1], True)
+                pygame.draw.aaline(DISPSURF, (255, 0, 255), focus_points_omni[x], focus_points_omni[-2], True)
+
+        chassis_focus = {'origin_a': focus_origin_a, 'origin_b': focus_origin_b, 'a': {'pos': focus_point_a, 'degree': angle_between_points(focus_point_a, focus_origin_b)}, 'b': {'pos': focus_point_b, 'degree': angle_between_points(focus_point_b, focus_origin_a)}, 'c_degree': self.tank.chassis_degree_val, 'bounding_points': None, 'bounding_connections': None, 'stats': {'distance': focus_sight_dist}}
+        return chassis_focus
+
+
+    def check_chassis_fov_rect_collisions(self, chassis_fov):
+        '''
+        Provides a list of all units within the same sectors as the chassis_fov_rect whose rects collide with the chassis_fov_rect.
+        '''
+        chassis_fov_rect = self.master_sector.create_rect_from_points([chassis_fov['origin']['pos'], chassis_fov['a']['pos'], chassis_fov['b']['pos'], chassis_fov['c']['pos']])
+        sectors_occupied = self.master_sector.sector_point_collision_omni(chassis_fov_rect)
+        sectors_unit_list_omni = list(set([self.master_sector.sectors[sectors_occupied[x]].unit_list_omni[i] for x in range(len(sectors_occupied)) for i in range(len(self.master_sector.sectors[sectors_occupied[x]].unit_list_omni)) if chassis_fov_rect.colliderect(self.master_sector.units[self.master_sector.sectors[sectors_occupied[x]].unit_list_omni[i]]['unit_rect']) == True and self.master_sector.sectors[sectors_occupied[x]].unit_list_omni[i] != self.unit_id]))
+        return sectors_unit_list_omni
+
+
+    def check_chassis_focus_rect_collisions(self, chassis_focus):
+        '''
+        Seeks and provides a list of all units within the same sectors as the chassis_focus_rect whose rects collide with the chassis_focus_rect.
+        '''
+        chassis_focus_rect = self.master_sector.create_rect_from_points([chassis_focus['origin_a'], chassis_focus['origin_b'], chassis_focus['a']['pos'], chassis_focus['b']['pos']])
+        sectors_occupied = self.master_sector.sector_point_collision_omni(chassis_focus_rect)
+        sectors_unit_list_omni = list(set([self.master_sector.sectors[sectors_occupied[x]].unit_list_omni[i] for x in range(len(sectors_occupied)) for i in range(len(self.master_sector.sectors[sectors_occupied[x]].unit_list_omni)) if chassis_focus_rect.colliderect(self.master_sector.units[self.master_sector.sectors[sectors_occupied[x]].unit_list_omni[i]]['unit_rect']) == True and self.master_sector.sectors[sectors_occupied[x]].unit_list_omni[i] != self.unit_id]))
+        return sectors_unit_list_omni
+
+    
+    def check_chassis_focus_bounding_collisions(self, chassis_focus, colliding_units):
+        '''
+        Provides a detailed bounding-box collision check for the chassis_focus against units previously determined to be colliding with the chassis_focus_rect.
+
+        Returns a list of colliding units.
+        '''
+        #colors = [(0, 0, 0), (255, 0, 255), (0, 255, 0), (0, 255, 255)]
+        #for x in range(len(self.tank.bounding_points)):
+            #pygame.draw.circle(DISPSURF, colors[x], self.tank.bounding_points[x], 5, 0)
+        chassis_focus_boundings = [chassis_focus['b']['pos'], chassis_focus['a']['pos'], chassis_focus['origin_b'], chassis_focus['origin_a']]
+        #for x in range(len(chassis_focus_boundings)):
+            #pygame.draw.circle(DISPSURF, colors[x], chassis_focus_boundings[x], 5, 0)
+        chassis_focus_rect = self.master_sector.create_rect_from_points(chassis_focus_boundings)
+        chassis_focus_connections = self.master_sector.get_unit_bounding_connections(chassis_focus_rect, chassis_focus_boundings)
+        for x in range(len(chassis_focus_boundings)):
+            clock_halfway_pos = pos_from_degrees(chassis_focus_boundings[x], angle_between_points(chassis_focus_boundings[chassis_focus_connections[x]['clockwise_index']], chassis_focus_boundings[x]), int(distance_between_positions(chassis_focus_boundings[chassis_focus_connections[x]['clockwise_index']], chassis_focus_boundings[x]) / 2))
+            clock_halfway_pos = (int(clock_halfway_pos[0]), int(clock_halfway_pos[1]))
+            counter_halfway_pos = pos_from_degrees(chassis_focus_boundings[x], angle_between_points(chassis_focus_boundings[chassis_focus_connections[x]['counterclock_index']], chassis_focus_boundings[x]), int(distance_between_positions(chassis_focus_boundings[chassis_focus_connections[x]['counterclock_index']], chassis_focus_boundings[x]) / 2))
+            counter_halfway_pos = (int(counter_halfway_pos[0]), int(counter_halfway_pos[1]))
+            #pygame.draw.circle(DISPSURF, (0, 255, 0), chassis_focus_boundings[x], 3, 0)
+            pygame.draw.aaline(DISPSURF, (0, 255, 255), chassis_focus_boundings[x], clock_halfway_pos, True)
+            pygame.draw.aaline(DISPSURF, (255, 0, 0), chassis_focus_boundings[x], counter_halfway_pos, True)
+        focus_bounding_collisions = [colliding_units[x] for x in range(len(colliding_units)) if self.master_sector.check_bounding_box_collision((chassis_focus_boundings, chassis_focus_connections), (self.master_sector.units[colliding_units[x]]['bounding_points'], self.master_sector.units[colliding_units[x]]['bounding_connections'])) != (False, False)]
+        for x in range(len(focus_bounding_collisions)):
+            pygame.draw.circle(DISPSURF, (255, 0, 0), (10, 10), 10, 0)
         
-        # for x in range(len(self.fov_unit_keys)):
-        #     bounding_points_temp = []
-        #     if self.master_sector.units[self.fov_unit_keys[x]]['allegiance'] == 'OBSTACLE':
-        #         for i in range(len(self.master_sector.units[self.fov_unit_keys[x]]['bounding_points'])):
-        #             bounding_x_angle = angle_between_points(self.master_sector.units[self.fov_unit_keys[x]]['unit_rect'].center, self.master_sector.units[self.fov_unit_keys[x]]['bounding_points'][i])
-        #             bounding_x_dist = distance_between_positions(self.master_sector.units[self.fov_unit_keys[x]]['unit_rect'].center, self.master_sector.units[self.fov_unit_keys[x]]['bounding_points'][i])
-        #             new_bounding_pos_x = pos_from_degrees(self.master_sector.units[self.fov_unit_keys[x]]['unit_rect'].center, bounding_x_angle, (bounding_x_dist + int(self.tank.node_distance / 2)))
-        #             new_bounding_pos_x = (int(new_bounding_pos_x[0]), int(new_bounding_pos_x[1]))
-        #             new_bounding_pos_i = pos_from_degrees(self.master_sector.units[self.fov_unit_keys[x]]['unit_rect'].center, bounding_x_angle + 45.0, (bounding_x_dist + int(self.tank.node_distance / 2)))
-        #             new_bounding_pos_i = (int(new_bounding_pos_i[0]), int(new_bounding_pos_i[1]))
-        #             bounding_points_temp.append(new_bounding_pos_x)
-        #             #bounding_points_temp.append(new_bounding_pos_i)
-        #         for i in range(len(bounding_points_temp)):
-        #             pygame.draw.circle(DISPSURF, (0, 255, 255), bounding_points_temp[i], 3, 0)
-        #             pygame.draw.aaline(DISPSURF, (0, 255, 255), bounding_points_temp[i], self.master_sector.units[self.fov_unit_keys[x]]['unit_rect'].center, True)
+        return focus_bounding_collisions
+
+
+    def draw_chassis_fov(self, chassis_fov):
+        pygame.draw.polygon(DISPSURF, (0, 0, 0), [chassis_fov['origin']['pos'], chassis_fov['a']['pos'], chassis_fov['c']['pos'], chassis_fov['b']['pos'], chassis_fov['origin']['pos']], 1)
+
+
+    def movement_operations(self):
+        '''
+        These inputs will allow the Artificial to effectively control its unit in order to avoid collisions with other units, be they
+        active or obstacles.
+        '''
+        #Realistically, the chassis_focus need not even comprise an fov-deltoid, let alone two. It could simply exist as two points indicating the boundary of the chassis in the midsection, along with two
+        #degree-vals that are aimed in the same direction as the chassis_degree_val itself. The chassis_fov can handle all of the brunt-work, while the chassis_focus can exist solely to determine immediately
+        #pressing collision potentialities.
+
+        #One of the largest goals for the pathfinding functionality is speed, even at the cost of accuracy. Unlike the LOS-nodal-pathfinding system, which will be used incredibly rarely as once it has run and
+        #a path has been provided no further reinstatements of the same methods will be necessary, the movement-pathfinding system will likely be utilized by each Artificial per frame. 
+        #A methodology will need to be enacted for the pathfinding system (should a correction be provided and a temporary path waypoint be set), presumably whereby the pathfinding system will set the focus to be
+        #adjusted in the direction of the new waypoint and perform calculations from there, as otherwise it would constantly recalculate and provide the same solution ad infinum. Determining solutions to this problem
+        #will be a thematic constant through to the fnalization of this functionality, as it will be present at every solution.
+        #Again, the solution to this problem is multi-faceted and layered: 1=>Generic chassis_focus/chassis_fov pathfinding corrections, which provide simple waypoints around obstructions; 2=>Obstruction Nodal Generation
+        #3=>Legitimate Pathfinding:(
+
+        chassis_focus = self.create_chassis_focus()
+        chassis_fov = self.master_sector.create_fov_deltoid(self.tank.rotated_chassis_rect.center, self.tank.chassis_degree_val, self.movement_stats['chassis_fov']['stats']['range'], self.movement_stats['chassis_fov']['stats']['distance'])
+        self.draw_chassis_fov(chassis_fov)
+        self.movement_stats['chassis_focus'] = chassis_focus
+        self.movement_stats['chassis_fov'] = chassis_fov
+        fov_colliding_units_rect = self.check_chassis_fov_rect_collisions(chassis_fov)
+        if len(fov_colliding_units_rect) >= 0:
+            if len(fov_colliding_units_rect) >= 0:
+                fov_colliding_units_rect = self.check_chassis_focus_rect_collisions(chassis_focus)
+            focus_colliding_units_omni = self.check_chassis_focus_bounding_collisions(chassis_focus, fov_colliding_units_rect)
+            for x in range(len(fov_colliding_units_rect)):
+                unit_x_fov_stats = self.determine_fov_unit_los(fov_colliding_units_rect[x], self.movement_stats['chassis_fov'])
+                pygame.draw.aaline(DISPSURF, (255, 0, 0), unit_x_fov_stats['clockwise'], self.tank.rotated_chassis_rect.center, True)
+                pygame.draw.aaline(DISPSURF, (255, 0, 0), unit_x_fov_stats['counterclock'], self.tank.rotated_chassis_rect.center, True)
+            #complete up to this point, currently what occurs is that the chassis_fov is utilized to create a list of units whose rects collide with its own, and any units within are tested for bounding_collisions
+            #with the bounding_box of the chassis_focus. This is done so that a list of units colliding with the rect of the chassis_fov is already comprised in the event of any bounding_collisions, and can be
+            #utilized for adjustments as opposed to needlessly searching the same areas and performing, fundamentally, the same checks with a slightly increased area size, which would have been the case if
+            #the chassis_focus first created a list of colliding-units, then checked the bounding-box collisions, and then passed that list to the chassis_fov to recheck rect collisions and perform further
+            #calculations upon.
+            #Must also make a determination regarding the TYPE of obstruction that is found. If an obstruction is, for example, an enemy unit rather than an obstacle, or an allied unit, behaviors to deal with such
+            #occurences must be included.
+        
                 
 
 
@@ -3486,10 +3615,7 @@ class Artificial():
         self.tank.update_target(self.desired_aim)
         self.combat_operations()
         self.tank.weapons_firing_initiate()
-        #print(self.fov_unit_stats)
-        #print(self.fov_unit_keys)
-        #print(self.sighted_units)
-        #print(self.sighted_units_keys)
+        self.movement_operations()
 
 
             
@@ -4028,6 +4154,8 @@ def main():
     #Obs Images
     pine_tree_img = pygame.image.load('tree_pine_1.png').convert_alpha()
     pine_tree_img = pygame.transform.scale(pine_tree_img, (150, 150))
+    building_blue_img = pygame.image.load('building_blue.png').convert_alpha()
+
 
 
 
@@ -4064,6 +4192,8 @@ def main():
     
     #Obs Sprite Variables
     pine_obs = {'img': pine_tree_img, 'rotate_offset': (44, 0), 'bounding_offsets': [(50, -50), (50, 50), (-50, -50), (-50, 50)], 'health': {'mortal': False}}
+
+    building_obs = {'img': building_blue_img, 'rotate_offset': (44, 0), 'bounding_offsets': [(120, 90), (120, -90), (-120, -90), (-120, 90)], 'health': {'mortal': False}}
 
     #PlayerTank variables
     
@@ -4109,7 +4239,7 @@ def main():
 
     #AuxiliaryTank variables
     aux_tanks = []
-    aux_positions = [] #[(500, 300)] #[(200, 450), (625, 350), (800, 450), (500, 300), (75, 100), (575, 75), (925, 75), (900, 575), (60, 500)]
+    aux_positions = [] #[(500, 300), (500, 450)] #[(200, 450), (625, 350), (800, 450), (500, 300), (75, 100), (575, 75), (925, 75), (900, 575), (60, 500)]
     for x in range(len(aux_positions)):
         #aux_tank = Tank(enemy_chassis2, enemy_tank_turret2, [standard_shell], {}, aux_positions[x], 'ENEMY', master_sector)
         #aux_tanks.append(aux_tank)
@@ -4125,11 +4255,18 @@ def main():
 
     #Obstacle variables
     obs_omni = []
-    obs_positions = [((300, 250), 0), ((350, 100), 0)]
+    obs_positions = [] #[((300, 250), 0), ((350, 100), 0)]
     for x in range(len(obs_positions)):
         obs_x_dict = {'unit_type': 'obstacle', 'obstacle': pine_obs, 'pos': obs_positions[x][0], 'degree_val': obs_positions[x][1]}
         obs_x = master_sector.instantiate_unit(obs_x_dict)
         obs_omni.append(obs_x)
+    
+    buildings_omni = []
+    buildings_positions = [((350, 100), 0)]
+    for x in range(len(buildings_positions)):
+        building_x_dict = {'unit_type': 'obstacle', 'obstacle': building_obs, 'pos': buildings_positions[x][0], 'degree_val': buildings_positions[x][1]}
+        building_x = master_sector.instantiate_unit(building_x_dict)
+        obs_omni.append(building_x)
     
     
 
@@ -4194,9 +4331,25 @@ def main():
                 elif (event.key == K_SPACE):
                     weapon_reloading = True
                 elif (event.key == K_p):
+                    #time_start_clock = pygame.time.get_ticks()
+                    #goal_pos = (mouse['mouse_x'], mouse['mouse_y'])
+                    #artificial_enemy.desired_pos = goal_pos
+                    #artificial_enemy.path_info = pathfinding_salvo_rework.main_loop(DISPSURF, artificial_enemy.tank.node_distance, obstacle_list, artificial_enemy.tank.rotated_chassis_rect.center, artificial_enemy.desired_pos)
+                    #artificial_enemy.path_stats = {'path_followed': False, 'path_gen': None, 'path_initiated': False}
+                    start_pos = artificial_enemy.tank.rotated_chassis_rect.center
+                    artificial_enemy.desired_pos = start_pos
+                    goal_pos = (mouse['mouse_x'], mouse['mouse_y'])
+                    area_rect = master_sector.create_rect_from_points([start_pos, goal_pos])
+                    sectors_occupied = master_sector.sector_point_collision_omni(area_rect)
+                    node_list_omni = []
+                    [node_list_omni.extend(master_sector.sectors[sectors_occupied[x]].sector_nodes) for x in range(len(sectors_occupied))]
+                    obstacle_rects = [master_sector.units[master_sector.sectors[sectors_occupied[x]].unit_list_omni[i]]['unit_rect'] for x in range(len(sectors_occupied)) for i in range(len(master_sector.sectors[sectors_occupied[x]].unit_list_omni)) if master_sector.sectors[sectors_occupied[x]].unit_list_omni[i] != artificial_enemy.unit_id]
+                    
                     time_start_clock = pygame.time.get_ticks()
-                    artificial_enemy.path_info = pathfinding_salvo_rework.main_loop(DISPSURF, artificial_enemy.tank.node_distance, obstacle_list, artificial_enemy.tank.rotated_chassis_rect.center, artificial_enemy.desired_pos)
+
+                    artificial_enemy.path_info = pathfinding_salvo_rework.generate_foreign_path(node_list_omni, 100, obstacle_rects, start_pos, goal_pos)
                     artificial_enemy.path_stats = {'path_followed': False, 'path_gen': None, 'path_initiated': False}
+
                     time_stop_clock = pygame.time.get_ticks()
                     total_time = time_stop_clock - time_start_clock
                     print(total_time)
@@ -4219,9 +4372,13 @@ def main():
         if weapon_reloading == True:
             check_weapon_reload(master_sector.unit_objects[playerTank_id])
             
-        master_sector.unit_objects[playerTank_id].update_chassis_direction_via_keys(chassis_direction)
-        master_sector.unit_objects[playerTank_id].update_firing_check(weapon_firing)
-        master_sector.unit_objects[playerTank_id].weapons_firing_initiate()
+        #master_sector.unit_objects[playerTank_id].update_chassis_direction_via_keys(chassis_direction)
+        #master_sector.unit_objects[playerTank_id].update_firing_check(weapon_firing)
+        #master_sector.unit_objects[playerTank_id].weapons_firing_initiate()
+
+        master_sector.unit_objects[enemyTank_id].update_chassis_direction_via_keys(chassis_direction)
+        master_sector.unit_objects[enemyTank_id].update_firing_check(weapon_firing)
+        master_sector.unit_objects[enemyTank_id].weapons_firing_initiate()
                 
                     
         DISPSURF.fill(BGCOLOR)
@@ -4263,6 +4420,10 @@ def main():
 
         for x in range(len(master_sector.sector_keys)):
             master_sector.sectors[master_sector.sector_keys[x]].draw_self(DISPSURF)
+
+        #for x in range(len(master_sector.sector_keys)):
+            #for i in range(len(master_sector.sectors[master_sector.sector_keys[x]].sector_nodes)):
+                #master_sector.sectors[master_sector.sector_keys[x]].sector_nodes[i].draw_self(DISPSURF)
 
 
 
