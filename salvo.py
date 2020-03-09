@@ -1,11 +1,15 @@
 # Salvo
-# v0_9_6_9zp
+# v0_9_6_9zr
 
 #Notes To Self
 
 
 #CURRENT VERSION CHANGES
-# * Addition of a nodally based obstacle relational pathfinding system. 
+# * Addition of a nodally based obstacle relational pathfinding system.
+# * Addition of a generic pathfinding system that operates in approximately 1ms, as opposed to the 10-20 required by the relational obstacle-node pathfinding system.
+# * Edited the Artificial LOS functionality to include bounding-box collision checks during pathfinding, to ensure an adequate path is provided. This was done as opposed to
+#using the newly designed nodal pathfinding method due to the requirements of the LOS functionality being particularly niche, and that the pathfinding pool method would require
+#substantial refactoring to provide for these obscure requirements in a manner that would not provide broad applicability to other nodal-pathfinding needs.
 
 
 #To-do:
@@ -52,6 +56,7 @@ from pygame.locals import *
 import pathfinding_salvo_rework
 import numpy
 import copy
+import timeit
 
 import time #UNIMPORT UPON TESTING COMPLETION
 
@@ -639,6 +644,10 @@ class Tank():
 
 
     def check_unit_collision(self):
+        '''
+        Determines if the unit has moved positionally or reoriented via rotation and, if so, calls upon the MasterSector to check for, and resolve, any bounding-box collisions.
+        Receives a degree-value from the MasterSector if a collision is detected, then alters its orientation by the specified amount.
+        '''
         if self.prior_chassis_pos != self.rotated_chassis_rect.center or self.prior_chassis_degree_val != self.chassis_degree_val:
             degree_change = self.master_sector.reorient_unit_collisions_omni(self.unit_id)
             if degree_change != 0.0:
@@ -1279,6 +1288,7 @@ class MasterSector():
         self.impacts = {}
         self.impact_objects = {}
         self.artificial_objects = {}
+        self.pathfinding_queue = {'1': [], '2': [], 'current_1': 0, 'current_2': 0, 'time_delta': 0}
 
 
 
@@ -1342,13 +1352,13 @@ class MasterSector():
 
     def create_unit(self, unit_id, unit_allegiance, unit_type, unit_dict):
         if unit_type == 'tank':
-            self.units[unit_id] = {'unit_id': unit_id, 'allegiance': unit_allegiance, 'unit_type': unit_type, 'sectors': [], 'unit_rect': unit_dict['chassis']['rect'], 'degree_val': unit_dict['chassis']['degree_val'], 'pos': unit_dict['chassis']['pos'], 'bounding_points': unit_dict['chassis']['bounding_points'], 'bounding_connections': {}, 'rot_axis': unit_dict['chassis']['rot_axis'], 'unit_spec': unit_dict['chassis']['unit_spec'], 'unit_sprite': unit_dict['chassis']['unit_sprite']}
+            self.units[unit_id] = {'unit_id': unit_id, 'allegiance': unit_allegiance, 'unit_type': unit_type, 'sectors': [], 'unit_rect': unit_dict['chassis']['rect'], 'degree_val': unit_dict['chassis']['degree_val'], 'pos': unit_dict['chassis']['pos'], 'bounding_points': unit_dict['chassis']['bounding_points'], 'bounding_connections': {}, 'rot_axis': unit_dict['chassis']['rot_axis'], 'bounding_zero_degs': self.unit_bounding_point_zero_offsets(unit_dict['chassis']['bounding_points'], unit_dict['chassis']['rect'], unit_dict['chassis']['degree_val']), 'unit_spec': unit_dict['chassis']['unit_spec'], 'unit_sprite': unit_dict['chassis']['unit_sprite']}
             self.units[unit_id]['sectors'] = self.sector_point_collision_omni(unit_dict['chassis']['rect'])
             self.units[unit_id]['bounding_connections'] = self.get_unit_bounding_connections(unit_dict['chassis']['rect'], unit_dict['chassis']['bounding_points'])
             for x in range(len(self.units[unit_id]['sectors'])):
                 sector_x_id = self.units[unit_id]['sectors'][x]
                 self.sectors[sector_x_id].add_unit(unit_allegiance, unit_id)
-            self.turrets[unit_id] = {'unit_id': unit_id, 'allegiance': unit_allegiance, 'unit_type': unit_type, 'sectors': [], 'unit_rect': unit_dict['turret']['rect'], 'degree_val': unit_dict['turret']['degree_val'], 'pos': unit_dict['turret']['pos'], 'weapon_bounding_points': unit_dict['turret']['weapon_bounding_points'], 'weapon_bounding_connections': {}, 'rot_axis': unit_dict['turret']['rot_axis'], 'unit_spec': unit_dict['turret']['unit_spec'], 'unit_sprite': unit_dict['turret']['unit_sprite']}
+            self.turrets[unit_id] = {'unit_id': unit_id, 'allegiance': unit_allegiance, 'unit_type': unit_type, 'sectors': [], 'unit_rect': unit_dict['turret']['rect'], 'degree_val': unit_dict['turret']['degree_val'], 'pos': unit_dict['turret']['pos'], 'weapon_bounding_points': unit_dict['turret']['weapon_bounding_points'], 'weapon_bounding_connections': {}, 'rot_axis': unit_dict['turret']['rot_axis'], 'weapon_bounding_zero_degs': [self.unit_bounding_point_zero_offsets(unit_dict['turret']['weapon_bounding_points'][x]['bounding_points'], self.create_rect_from_points(unit_dict['turret']['weapon_bounding_points'][x]['bounding_points']), unit_dict['turret']['degree_val']) for x in range(len(unit_dict['turret']['weapon_bounding_points']))], 'unit_spec': unit_dict['turret']['unit_spec'], 'unit_sprite': unit_dict['turret']['unit_sprite']}
             self.turrets[unit_id]['sectors'] = self.sector_point_collision_omni(unit_dict['turret']['rect'])
             turret_bounding_connections = []
             for x in range(len(unit_dict['turret']['weapon_bounding_points'])):
@@ -1362,7 +1372,7 @@ class MasterSector():
                 self.sectors[sector_x_id].add_turret(unit_id)
 
         elif unit_type == 'obstacle':
-            self.units[unit_id] = {'unit_id': unit_id, 'allegiance': unit_allegiance, 'unit_type': unit_type, 'sectors': [], 'unit_rect': unit_dict['rect'], 'degree_val': unit_dict['degree_val'], 'pos': unit_dict['pos'], 'bounding_points': unit_dict['bounding_points'], 'bounding_connections': {}, 'rot_axis': unit_dict['rot_axis'], 'unit_spec': unit_dict['unit_spec'], 'unit_sprite': unit_dict['unit_sprite']}
+            self.units[unit_id] = {'unit_id': unit_id, 'allegiance': unit_allegiance, 'unit_type': unit_type, 'sectors': [], 'unit_rect': unit_dict['rect'], 'degree_val': unit_dict['degree_val'], 'pos': unit_dict['pos'], 'bounding_points': unit_dict['bounding_points'], 'bounding_connections': {}, 'rot_axis': unit_dict['rot_axis'], 'bounding_zero_degs': self.unit_bounding_point_zero_offsets(unit_dict['bounding_points'], unit_dict['rect'], unit_dict['degree_val']), 'unit_spec': unit_dict['unit_spec'], 'unit_sprite': unit_dict['unit_sprite']}
             self.units[unit_id]['sectors'] = self.sector_point_collision_omni(unit_dict['rect'])
             self.units[unit_id]['bounding_connections'] = self.get_unit_bounding_connections(unit_dict['rect'], unit_dict['bounding_points'])
             for x in range(len(self.units[unit_id]['sectors'])):
@@ -1388,6 +1398,11 @@ class MasterSector():
                 self.sectors[updated_sectors[x]].add_impact(impact_id)
         return updated_sectors
 
+    def unit_bounding_point_zero_offsets(self, bounding_points, unit_rect, unit_degree_val):
+        '''
+        Returns a list of degree-vals from the unit_rect.center to each individual bounding-point, ensuring each degree-val is registered from a zero degree-orientation.
+        '''
+        return [normalize_degree(angle_between_points(bounding_points[x], unit_rect.center) - unit_degree_val) for x in range(len(bounding_points))]
     
     def instantiate_unit(self, unit_dict):
         '''
@@ -1583,7 +1598,23 @@ class MasterSector():
         """
         turret_stats = dict(self.turrets[unit_id])
         return turret_stats
-        
+
+    
+    def get_turret_weapon_stats(self, unit_id, weapon_index):
+        '''
+        Provides a dict bearing the turret's selected weapon information from the MasterSector.
+        '''
+        turret_dict = self.get_turret_stats(unit_id)
+        turret_sprite = turret_dict.pop('unit_sprite')
+        turret_rect = turret_dict.pop('unit_rect')
+        weapon_stats = copy.deepcopy(turret_dict)
+        turret_dict['unit_sprite'] = turret_sprite
+        turret_dict['unit_rect'] = turret_rect
+        weapon_stats['bounding_points'] = weapon_stats['weapon_bounding_points'][weapon_index]['bounding_points']
+        weapon_stats['bounding_connections'] = dict(weapon_stats['weapon_bounding_connections'][weapon_index])
+        weapon_stats['bounding_zero_degs'] = weapon_stats['weapon_bounding_zero_degs'][weapon_index]
+
+        return weapon_stats
 
 
     def sector_point_collision_omni(self, unit_rect):
@@ -1798,6 +1829,10 @@ class MasterSector():
 
     
     def check_unit_health(self, unit_id):
+        '''
+        Checks a given unit's health and removes the target unit should it have reached a health level that is equal to or lesser than zero.
+        Currently restores a unit back to full health for testing and developmental purposes.
+        '''
         health = self.unit_objects[unit_id].health['health']
         if health <= 0:
             health = int(self.unit_objects[unit_id].health['max_health'])
@@ -1805,7 +1840,55 @@ class MasterSector():
             # self.cull_unit(unit_id)
             # if unit_id in self.artificial_objects:
             #     self.cull_artificial(unit_id)
-                    
+
+    
+    def artificial_pathfinding_request(self, artificial_id, pathfinding_level):
+        '''
+        Inserts an Artificial into the pathfinding queue for the given level requested.
+        '''
+        self.pathfinding_queue[str(pathfinding_level)].append(artificial_id)
+
+
+    def artificial_pathfinding_queue(self):
+        '''
+        Provides a queueing system for artificials to subscribe to in order to ensure that an influx of artificials attempting to
+        seek paths to a destination do not cripple the framerate. Each unit will provide a request consisting of their ID and the
+        pathfinding-level sought. These levels will be either "1" or "2" (integer values, not strings), with "1" representing the
+        Obstacle Relation Nodal System, and "2" representing the AStar pathfinding algorithm that (while of ultimate accuracy) is
+        the least efficient and most susceptible to wait-times ranging from 20ms to 200ms.
+        The Obstacle Relation Nodal System will allow for three applicants per 1000ms interval, whereas the AStar Search will allow
+        for only a single applicant per 1000ms interval, where the Obstacle Relation Nodal System will receive priority, as at three
+        applicants per second, that allows for potentially three units to reengage in combat in a relatively short period of time at
+        the cost of a minor reduction in frames per second. The AStar Search applicants, however, will have already attempted Obstacle
+        Relation Nodal Pathfinding and failed to sufficiently provide a path. They will, as a result of their failure, be punished by
+        being forced to await the end of the queue (unless testing proves that this retribution is too aggressive).
+
+        The MasterSector will also keep track of the Artificials requesting permission via a list and a current index. The index will
+        increment as long as the current index is not the last index of the list. Once the current index is the final index of the list,
+        the list will be discarded and an empty list will replace it, while the current index is reset to zero.
+        '''
+
+        current_time = pygame.time.get_ticks()
+        if self.pathfinding_queue['time_delta'] <= current_time:
+            if len(self.pathfinding_queue['1']) > 0:
+                artificial_id = self.pathfinding_queue['1'][self.pathfinding_queue['current_1']]
+                self.artificial_objects[artificial_id].movement_stats['pathfinding']['clearance'] = 1
+                if len(self.pathfinding_queue['1']) - 1 == self.pathfinding_queue['current_1']:
+                    self.pathfinding_queue['1'] = []
+                    self.pathfinding_queue['current_1'] = 0
+                else:
+                    self.pathfinding_queue['current_1'] += 1
+                self.pathfinding_queue['time_delta'] = current_time + 333
+            elif len(self.pathfinding_queue['2']) > 0:
+                artificial_id = self.pathfinding_queue['2'][self.pathfinding_queue['current_2']]
+                self.artificial_objects[artificial_id].movement_stats['pathfinding']['clearance'] = 2
+                if len(self.pathfinding_queue['2']) - 1 == self.pathfinding_queue['current_2']:
+                    self.pathfinding_queue['2'] = []
+                    self.pathfinding_queue['current_2'] = 0
+                else:
+                    self.pathfinding_queue['current_2'] += 1
+                self.pathfinding_queue['time_delta'] = current_time + 1000
+
 
 
 
@@ -1903,6 +1986,7 @@ class MasterSector():
                 return True
         return False
 
+
     
     def create_bounding_box_from_rect(self, rect):
         '''
@@ -1940,7 +2024,7 @@ class MasterSector():
 
     def furthest_bounding_point_degree_field(self, degree_field, box):
         '''
-        Provides the furthest-bounding-point to a given degree-field (consisting of clockwise-degrees,
+        Provides the furthest bounding-point to a given degree-field (consisting of clockwise-degrees,
         counterclock-degrees and an origin-point) from a bounding-box.
         '''
 
@@ -1959,7 +2043,8 @@ class MasterSector():
         return False
             
 
-    def check_bounding_box_collision(self, box_a, box_b, center_a=False, center_b=False):
+    #def check_bounding_box_collision(self, box_a, box_b, center_a=False, center_b=False):
+    def old_check_bounding_box_collision(self, box_a, box_b, center_a=False, center_b=False):
         '''
         Tests two bounding-boxes for collisions, requires two tuples containing
         the information of the bounding-boxes to be passed, consisting of the bounding-points and
@@ -1992,9 +2077,241 @@ class MasterSector():
                 return False, (degree_field_b[2], collision_b[0])
             
         return False, False
+
+
+    def check_bounding_box_collision(self, box_a_stats, box_b_stats, box_a_rect, box_b_rect):
+        '''
+        A refactoring of the bounding-box collision detection system. This method first checks for a regular pygame.Rect object collision against
+        another pygame.Rect object and, if such a collision exists, will then utilize bounding-box collision checking to determine if a precise
+        point-interloping has occurred.
+
+        Returns a collision_a (one of unit_a's bounding-points inhabiting the confines of unit_b's bounding-box) tuple consisting of unit_b's selected point and unit_a's interloping point
+        if such a collision is detected, else returns False, and a collision_b (one of unit_b's bounding_points inhabiting the confines of unit_a's bounding-box) tuple consisting of unit_a's
+        selected point and unit_b's interloping point if such a collision is detected, else False.
+
+        Args:
+        box_a_stats: a tuple containing box_a's bounding_points, box_a's center, box_a's degree-val and box_a's zero_degs.
+        box_b_stats: a tuple containing box_b's bounding_points, box_b's center, box_b's degree_val and box_b's zero degs.
+        '''
+
+        #print(box_a_stats, box_b_stats)
+        likewise_angle = False
+        box_b_angles_box_a_points = [normalize_degree(angle_between_points(box_a_stats[0][x], box_b_stats[1]) - box_b_stats[2]) for x in range(len(box_a_stats[0]))]
+        if len(set(box_b_angles_box_a_points).intersection(set(box_b_stats[3]))) > 0:
+            print(f'{box_a_stats}\n\n{box_b_stats}\n***************************')
+            likewise_angle = True
+
+        
+        rect_collision = box_a_rect.colliderect(box_b_rect)
+        if rect_collision != False:
+            bounding_collision_a, bounding_collision_b = self.bounding_box_collision_check(box_a_stats, box_b_stats)
+            if likewise_angle == True:
+                print(bounding_collision_a, bounding_collision_b)
+                time.sleep(5)
+            return bounding_collision_a, bounding_collision_b
+        return False, False
+
+
+    def bounding_box_collision_check(self, box_a_stats, box_b_stats):
+        '''
+        A refactorizing of the previous bounding-box collision detection methodology, which utilized ultimately inefficient and inadequate
+        techniques to determine the existence and perpetrators of a bounding-box collision based upon the inhabitance of one bounding-box
+        by the point of another (including line-segment inhabitation).
+        The new mechanism determines whether or not the centers of either bounding-box inhabit the confines of the other, and then test the two
+        points of interest of each bounding-box against the appropriate bounding-line. This test is done by performing a line-segment intersection
+        check (with a boolean determinant) compared upon a line segment from one bounding-box's (box-A) center to the alternate bounding-box's (box-B)
+        point (point-X) under consideration against a line segment consisting of the bounding-points of box-A whose connecting line is intersected by that of 
+        the line from box-A's center to box-B's point-X. 
+        If no intersection is found to have occurred, this indicates that point-X is within the confines of box-A.
+
+        Args:
+        box_a_stats: a tuple containing box_a's bounding_points, box_a's center, box_a's degree-val and box_a's zero_degs.
+        box_b_stats: a tuple containing box_b's bounding_points, box_b's center, box_b's degree_val and box_b's zero degs.
+        '''
+
+        box_a_points, box_a_center, box_a_deg_val, box_a_zero_degs = box_a_stats
+        box_b_points, box_b_center, box_b_deg_val, box_b_zero_degs = box_b_stats
+
+        bounding_centers_deg = angle_between_points(box_b_center, box_a_center)
+        polar_centers_deg = polarize_degree(bounding_centers_deg)
+
+        normalized_polar_center_box_b_deg = normalize_degree(polar_centers_deg - box_b_deg_val)
+        box_b_bounding_indexes = (None, None)
+        if normalized_polar_center_box_b_deg < 0:
+            if normalized_polar_center_box_b_deg < box_b_zero_degs[0]:
+                if normalized_polar_center_box_b_deg > box_b_zero_degs[2]:
+                    box_b_bounding_indexes = (2, 0)
+                else:
+                    box_b_bounding_indexes = (3, 2)
+            else:
+                box_b_bounding_indexes = (0, 1)
+        else:
+            if normalized_polar_center_box_b_deg > box_b_zero_degs[1]:
+                if normalized_polar_center_box_b_deg < box_b_zero_degs[3]:
+                    box_b_bounding_indexes = (1, 3)
+                else:
+                    box_b_bounding_indexes = (3, 2)
+            else:
+                box_b_bounding_indexes = (0, 1)
+
+        normalized_center_box_a_deg = normalize_degree(bounding_centers_deg - box_a_deg_val)
+        box_a_bounding_indexes = (None, None)
+        if normalized_center_box_a_deg < 0:
+            if normalized_center_box_a_deg < box_a_zero_degs[0]:
+                if normalized_center_box_a_deg > box_a_zero_degs[2]:
+                    box_a_bounding_indexes = (2, 0)
+                else:
+                    box_a_bounding_indexes = (3, 2)
+            else:
+                box_a_bounding_indexes = (0, 1)
+        else:
+            if normalized_center_box_a_deg > box_a_zero_degs[1]:
+                if normalized_center_box_a_deg < box_a_zero_degs[3]:
+                    box_a_bounding_indexes = (1, 3)
+                else:
+                    box_a_bounding_indexes = (3, 2)
+            else:
+                box_a_bounding_indexes = (0, 1)
+
+        box_b_bounding_degs = {(0, 1): (normalize_degree(box_b_deg_val - 90), normalize_degree(box_b_deg_val + 90)), (2, 0): (polarize_degree(box_b_deg_val), box_b_deg_val),
+                                    (1, 3): (box_b_deg_val, polarize_degree(box_b_deg_val)), (3, 2): (normalize_degree(box_b_deg_val + 90), normalize_degree(box_b_deg_val - 90))}[box_b_bounding_indexes]
+        
+        box_a_zeroed_box_b_clock_deg = normalize_degree(box_b_bounding_degs[0] - box_a_deg_val)
+        if box_a_zeroed_box_b_clock_deg > 0:
+            if box_a_zeroed_box_b_clock_deg < box_a_zero_degs[1]:
+                box_a_active_indexes = (0, 2)
+            else:
+                if box_a_zeroed_box_b_clock_deg < box_a_zero_degs[3]:
+                    box_a_active_indexes = (0, 1)
+                else:
+                    box_a_active_indexes = (1, 3)
+        else:
+            if box_a_zeroed_box_b_clock_deg > box_a_zero_degs[0]:
+                box_a_active_indexes = (0, 2)
+            else:
+                if box_a_zeroed_box_b_clock_deg > box_a_zero_degs[2]:
+                    box_a_active_indexes = (2, 3)
+                else:
+                    box_a_active_indexes = (1, 3)
+
+        box_a_bounding_degs = {(0, 1): (normalize_degree(box_a_deg_val - 90), normalize_degree(box_a_deg_val + 90)), (2, 0): (polarize_degree(box_a_deg_val), box_a_deg_val),
+                                    (1, 3): (box_a_deg_val, polarize_degree(box_a_deg_val)), (3, 2): (normalize_degree(box_a_deg_val + 90), normalize_degree(box_a_deg_val - 90))}[box_a_bounding_indexes]
+        
+        box_b_zeroed_player_clock_deg = normalize_degree(box_a_bounding_degs[0] - box_b_deg_val)
+        if box_b_zeroed_player_clock_deg > 0:
+            if box_b_zeroed_player_clock_deg < box_b_zero_degs[1]:
+                box_b_active_indexes = (0, 2)
+            else:
+                if box_b_zeroed_player_clock_deg < box_b_zero_degs[3]:
+                    box_b_active_indexes = (0, 1)
+                else:
+                    box_b_active_indexes = (1, 3)
+        else:
+            if box_b_zeroed_player_clock_deg > box_b_zero_degs[0]:
+                box_b_active_indexes = (0, 2)
+            else:
+                if box_b_zeroed_player_clock_deg > box_b_zero_degs[2]:
+                    box_b_active_indexes = (2, 3)
+                else:
+                    box_b_active_indexes = (1, 3)
+
+        box_a_active_points = [box_a_points[box_a_active_indexes[x]] for x in range(len(box_a_active_indexes))]
+        box_b_active_points = [box_b_points[box_b_active_indexes[x]] for x in range(len(box_b_active_indexes))]
+
+        box_a_center_in_box_b = {True: False, False: True}[line_segment_intersect_bool(box_a_center, box_b_center, box_b_points[box_b_bounding_indexes[0]], box_b_points[box_b_bounding_indexes[1]])]
+        box_b_center_in_box_a = {True: False, False: True}[line_segment_intersect_bool(box_a_center, box_b_center, box_a_points[box_a_bounding_indexes[0]], box_a_points[box_a_bounding_indexes[1]])]
+
+        box_a_point_degs = [normalize_degree(angle_between_points(box_a_points[x], box_a_center) - box_a_deg_val) for x in range(len(box_a_points))]
+        box_b_point_degs = [normalize_degree(angle_between_points(box_b_points[x], box_b_center) - box_b_deg_val) for x in range(len(box_b_points))]
+
+        box_a_point_collisions = []
+        for x in range(len(box_a_active_points)):
+            box_b_center_point_x_deg = angle_between_points(box_a_active_points[x], box_b_center)
+            normalized_b_x_deg = normalize_degree(box_b_center_point_x_deg - box_b_deg_val)
+            point_x_bounding_indexes = (None, None)
+            if normalized_b_x_deg < 0:
+                if normalized_b_x_deg < box_b_point_degs[0]:
+                    if normalized_b_x_deg > box_b_point_degs[2]:
+                        point_x_bounding_indexes = (2, 0)
+                    else:
+                        point_x_bounding_indexes = (3, 2)
+                else:
+                    point_x_bounding_indexes = (0, 1)
+            else:
+                if normalized_b_x_deg > box_b_point_degs[1]:
+                    if normalized_b_x_deg < box_b_point_degs[3]:
+                        point_x_bounding_indexes = (1, 3)
+                    else:
+                        point_x_bounding_indexes = (3, 2)
+                else:
+                    point_x_bounding_indexes = (0, 1)
+
+            if line_segment_intersect_bool(box_b_center, box_a_active_points[x], box_b_points[point_x_bounding_indexes[0]], box_b_points[point_x_bounding_indexes[1]]) == False:
+                if normalized_b_x_deg < 0 :
+                    if normalized_b_x_deg > -90:
+                        chosen_alter_index = 0
+                    else:
+                        chosen_alter_index = 2
+                else:
+                    if normalized_b_x_deg < 90:
+                        chosen_alter_index = 1
+                    else:
+                        chosen_alter_index = 3
+                box_a_point_collisions.append((box_b_points[chosen_alter_index], box_a_active_points[x]))
+
+        box_b_point_collisions = []
+        for x in range(len(box_b_active_points)):
+            box_a_center_point_x_deg = angle_between_points(box_b_active_points[x], box_a_center)
+            normalized_a_x_deg = normalize_degree(box_a_center_point_x_deg - box_a_deg_val)
+            point_x_bounding_indexes = (None, None)
+            if normalized_a_x_deg < 0:
+                if normalized_a_x_deg < box_a_point_degs[0]:
+                    if normalized_a_x_deg > box_a_point_degs[2]:
+                        point_x_bounding_indexes = (2, 0)
+                    else:
+                        point_x_bounding_indexes = (3, 2)
+                else:
+                    point_x_bounding_indexes = (0, 1)
+            else:
+                if normalized_a_x_deg > box_a_point_degs[1]:
+                    if normalized_a_x_deg < box_a_point_degs[3]:
+                        point_x_bounding_indexes = (1, 3)
+                    else:
+                        point_x_bounding_indexes = (3, 2)
+                else:
+                    point_x_bounding_indexes = (0, 1)
+
+            if line_segment_intersect_bool(box_a_center, box_b_active_points[x], box_a_points[point_x_bounding_indexes[0]], box_a_points[point_x_bounding_indexes[1]]) == False:
+                if normalized_a_x_deg < 0 :
+                    if normalized_a_x_deg > -90:
+                        chosen_alter_index = 0
+                    else:
+                        chosen_alter_index = 2
+                else:
+                    if normalized_a_x_deg < 90:
+                        chosen_alter_index = 1
+                    else:
+                        chosen_alter_index = 3
+                box_b_point_collisions.append((box_a_points[chosen_alter_index], box_b_active_points[x]))
+
+        
+        if len(box_a_point_collisions) == 0 and box_a_center_in_box_b:
+            box_a_point_collisions.append((box_b_active_points[0], box_a_active_points[0]))
+        if len(box_b_point_collisions) == 0 and box_b_center_in_box_a:
+            box_b_point_collisions.append((box_a_active_points[0], box_b_active_points[0]))
+
+        if len(box_a_point_collisions) == 0:
+            bounding_collision_b = False
+        else:
+            bounding_collision_b = box_a_point_collisions[0]
+        if len(box_b_point_collisions) == 0:
+            bounding_collision_a = False
+        else:
+            bounding_collision_a = box_b_point_collisions[0]        
+        
+        return bounding_collision_a, bounding_collision_b
+
             
-
-
     def create_rect_from_points(self, point_list):
         '''
         Receives n number of points in (x, y) format and converts them into a pygame-rect.
@@ -2010,20 +2327,22 @@ class MasterSector():
         same_sector_ids = []
         for x in range(len(self.units[unit_id]['sectors'])):
             sector_x = self.units[unit_id]['sectors'][x]
-            if len(self.sectors[sector_x].unit_list_omni) > 1:
+            if len(self.sectors[sector_x].unit_list_omni) > 0:
                 for i in range(len(self.sectors[sector_x].unit_list_omni)):
                     if self.sectors[sector_x].unit_list_omni[i] != unit_id:
                         same_sector_ids.append(self.sectors[sector_x].unit_list_omni[i])
+        same_sector_ids = list(set(same_sector_ids))
         return same_sector_ids
 
     def check_turret_sectors_omni(self, unit_id):
         same_sector_ids = []
         for x in range(len(self.turrets[unit_id]['sectors'])):
             sector_x = self.turrets[unit_id]['sectors'][x]
-            if len(self.sectors[sector_x].unit_list_omni) > 1:
+            if len(self.sectors[sector_x].unit_list_omni) > 0:
                 for i in range(len(self.sectors[sector_x].unit_list_omni)):
                     if self.sectors[sector_x].unit_list_omni[i] != unit_id:
                         same_sector_ids.append(self.sectors[sector_x].unit_list_omni[i])
+        same_sector_ids = list(set(same_sector_ids))
         return same_sector_ids
     
 
@@ -2508,26 +2827,26 @@ class MasterSector():
 
 
     def reorient_unit_collisions_omni(self, unit_id):
-        "Adjusts the specified unit in the event of a collision with one or more units."
+        """
+        Adjusts the specified unit in the event of a collision with one or more units.
+        """
 
         same_sector_ids = self.check_unit_sectors_omni(unit_id)
         collision_reassignment_b = False
         new_degree_val = 0.0
 
         for x in range(len(same_sector_ids)):
-            degree_val_x = 0.0
             obs_x = same_sector_ids[x]
             if unit_id in self.units:
-                unit_bounding_box = (self.units[unit_id]['bounding_points'], self.units[unit_id]['bounding_connections'])
-                obs_bounding_box = (self.units[obs_x]['bounding_points'], self.units[obs_x]['bounding_connections'])
-                unit_rect = self.units[unit_id]['unit_rect']
-                obs_rect = self.units[obs_x]['unit_rect']
-            bounding_collision_a, bounding_collision_b = self.check_bounding_box_collision(unit_bounding_box, obs_bounding_box, unit_rect.center, obs_rect.center)
-
-            if bounding_collision_a != False or bounding_collision_b != False:
                 unit_dict = self.get_unit_stats(unit_id)
                 obs_dict = self.get_unit_stats(obs_x)
 
+                unit_stats = (unit_dict['bounding_points'], unit_dict['unit_rect'].center, unit_dict['degree_val'], unit_dict['bounding_zero_degs'])
+                obs_stats = (obs_dict['bounding_points'], obs_dict['unit_rect'].center, obs_dict['degree_val'], obs_dict['bounding_zero_degs'])
+
+            bounding_collision_a, bounding_collision_b = self.check_bounding_box_collision(unit_stats, obs_stats, unit_dict['unit_rect'], obs_dict['unit_rect'])
+
+            if bounding_collision_a != False or bounding_collision_b != False:
                 degree_rotation_change_a = 0.0
                 degree_rotation_change_b = 0.0
 
@@ -2551,9 +2870,11 @@ class MasterSector():
 
 
     def reorient_turret_collisions_omni(self, unit_id):
-
-        if self.turrets[unit_id]['allegiance'] != 'PLAYER':
-            return 0.0
+        """
+        A turret-specific variant of the collision-detection and collision-correction protocol, that automatically adjusts for a varied number
+        of bounding-boxes under the dominion of a single entity, and thus all equally responsible for the collisions of and readjusments to the
+        entity's orientation in order to resolve those collisions.
+        """
 
         same_sector_ids = self.check_turret_sectors_omni(unit_id)
         collision_reassignment_b = False
@@ -2561,22 +2882,17 @@ class MasterSector():
 
         for x in range(len(self.turrets[unit_id]['weapon_bounding_points'])):
             for i in range(len(same_sector_ids)):
-                degree_val_i = 0.0
                 obs_i = same_sector_ids[i]
                 if unit_id in self.turrets:
-                    weapon_bounding_box = (self.turrets[unit_id]['weapon_bounding_points'][x]['bounding_points'], self.turrets[unit_id]['weapon_bounding_connections'][x])
-                    obs_bounding_box = (self.units[obs_i]['bounding_points'], self.units[obs_i]['bounding_connections'])
-                    weapon_rect = self.create_rect_from_points(self.turrets[unit_id]['weapon_bounding_points'][x]['bounding_points'])
-                    obs_rect = self.units[obs_i]['unit_rect']
-                bounding_collision_a, bounding_collision_b = self.check_bounding_box_collision(weapon_bounding_box, obs_bounding_box, weapon_rect.center, obs_rect.center)
+                    weapon_dict = self.get_turret_weapon_stats(unit_id, x)
+                    obs_dict = self.get_unit_stats(obs_i)
+                    weapon_dict['unit_rect'] = self.create_rect_from_points(weapon_dict['bounding_points'])
+                    weapon_stats = (weapon_dict['bounding_points'], weapon_dict['unit_rect'].center, weapon_dict['degree_val'], weapon_dict['bounding_zero_degs'])
+                    obs_stats = (obs_dict['bounding_points'], obs_dict['unit_rect'].center, obs_dict['degree_val'], obs_dict['bounding_zero_degs'])
+
+                bounding_collision_a, bounding_collision_b = self.check_bounding_box_collision(weapon_stats, obs_stats, weapon_dict['unit_rect'], obs_dict['unit_rect'])
 
                 if bounding_collision_a != False or bounding_collision_b != False:
-                    weapon_dict = self.get_turret_stats(unit_id)
-                    weapon_dict['unit_rect'] = weapon_rect
-                    weapon_dict['bounding_points'] = self.turrets[unit_id]['weapon_bounding_points'][x]['bounding_points']
-                    weapon_dict['bounding_connections'] = self.turrets[unit_id]['weapon_bounding_connections'][x]
-                    obs_dict = self.get_unit_stats(obs_i)
-
                     degree_rotation_change_a = 0.0
                     degree_rotation_change_b = 0.0
 
@@ -2595,9 +2911,19 @@ class MasterSector():
                         chosen_degree_val = degree_rotation_change_b
 
                     if abs(chosen_degree_val) > abs(new_degree_val):
-                        new_degree_val = chosen_degree_val
-                        
+                        new_degree_val = chosen_degree_val             
         return new_degree_val
+
+    
+
+    def master_sector_operations(self):
+        '''
+        Provides whatever operations management is required of the MasterSector on a per-frame basis, though it is integral that this
+        list of requirements remains as minimal as possible. Equally integral is that the docstring for this method is updated to be accurate
+        and reflect whatever pertinent information should be relayed to readers.
+        '''
+
+        self.artificial_pathfinding_queue()
                 
                                                
                                                     
@@ -2644,7 +2970,7 @@ class Artificial():
         'pathfinding': {'path': {}, 'goal_node': None}}
         self.movement_stats = {'chassis_focus': {'origin_a': None, 'origin_b': None, 'bounding_points': None, 'bounding_connections': None, 'stats': {'distance': 400, 'origin_dist': int(self.tank.node_distance / 2.8)}}, 
         'chassis_fov': {'a': {'degree_val': None, 'velocity': None, 'pos': None}, 'b': {'degree_val': None, 'velocity': None, 'pos': None}, 'c': {'degree_val': None, 'velocity': None, 'pos': None}, 'origin': {'degree_val': None, 'pos': None}, 'stats': {'distance': 200, 'range': 120}},
-        'pathfinding': {'path': {}, 'goal_node': None}}
+        'pathfinding': {'path': {}, 'goal_node': None, 'current_node': None, 'initiated': False, 'clearance': 0}}
 
 
         
@@ -2715,27 +3041,75 @@ class Artificial():
                 self.tank.chassis_direction['turn'] = random.choice(['counterclock', 'clockwise'])
 
 
+    #def move_chassis_to_desired(self): #OUTDATED
+    #     if self.desired_pos != None:
+    #         desired_dist = distance_between_positions(self.tank.rotated_chassis_rect.center, self.desired_pos)
+    #         if desired_dist == 0 and self.path_stats['path_followed'] == True:
+    #             self.desired_pos = None
+    #             self.halt_tank_movement()
+    #         #change the order to stop the tank from reorienting upon arrival at the desired_pos, as the elif statements cause the tank to correct
+    #         #the chassis_degree_val prior to teleporting to the desired_pos
+    #         elif desired_dist > self.tank.chassis_move_speed['forward'] and desired_dist < 100 and self.tank.chassis_degree_val != self.desired_degree_val:
+    #             self.tank.chassis_direction['move'] = None
+    #         elif desired_dist <= (self.tank.chassis_move_speed['forward'] * 2):
+    #             chassis_velocity = pygame.math.Vector2(1, 0).rotate(self.desired_degree_val) * desired_dist
+    #             chassis_move_pos = self.tank.chassis_pos + chassis_velocity
+    #             self.tank.chassis_pos = chassis_move_pos
+                
+    #             if self.path_info['path'] != None and self.path_stats['path_followed'] == False:
+    #                 if self.desired_pos == self.path_info['closest_node_goal'].center:
+    #                     self.clear_path_vars('stats')
+    #                     self.halt_tank_movement()
+    #                 else:
+    #                     self.follow_path()
+    #             else:
+    #                 self.desired_pos = None
+    #                 self.halt_tank_movement()
+                
+    #         else:
+    #             self.tank.chassis_direction['move'] = 'forward'
+
+    
     def move_chassis_to_desired(self):
-        if self.desired_pos != None:
+        '''
+        A refactored approach to positional goal attendance.
+        '''
+        #if self.desired_pos != None or self.movement_stats['pathfinding']['path'] != None:
+        
+        return
+
+        if self.movement_stats['pathfinding']['goal_node'] != None:
+            if self.movement_stats['pathfinding']['path'] != None:
+                print(self.movement_stats['pathfinding'])
+                print(self.tank.rotated_chassis_rect.center)
+                self.desired_pos = self.movement_stats['pathfinding']['path']['start_node']
+            else:
+                self.desired_pos = self.movement_stats['pathfinding']['goal_node']
             desired_dist = distance_between_positions(self.tank.rotated_chassis_rect.center, self.desired_pos)
-            if desired_dist == 0 and self.path_stats['path_followed'] == True:
+            if desired_dist == 0:
                 self.desired_pos = None
                 self.halt_tank_movement()
-            #change the order to stop the tank from reorienting upon arrival at the desired_pos, as the elif statements cause the tank to correct
-            #the chassis_degree_val prior to teleporting to the desired_pos
+
             elif desired_dist > self.tank.chassis_move_speed['forward'] and desired_dist < 100 and self.tank.chassis_degree_val != self.desired_degree_val:
                 self.tank.chassis_direction['move'] = None
             elif desired_dist <= (self.tank.chassis_move_speed['forward'] * 2):
                 chassis_velocity = pygame.math.Vector2(1, 0).rotate(self.desired_degree_val) * desired_dist
-                chassis_move_pos = self.tank.chassis_pos + chassis_velocity
-                self.tank.chassis_pos = chassis_move_pos
+                current_node_pos = vec2int(self.tank.chassis_pos + chassis_velocity)
+                self.tank.chassis_pos = current_node_pos
                 
-                if self.path_info['path'] != None and self.path_stats['path_followed'] == False:
-                    if self.desired_pos == self.path_info['closest_node_goal'].center:
-                        self.clear_path_vars('stats')
-                        self.halt_tank_movement()
+                if self.movement_stats['pathfinding']['path'] != None:
+                    if current_node_pos not in self.movement_stats['pathfinding']['path']:
+                        self.desired_pos = self.movement_stats['pathfinding']['goal_node']
+                        self.movement_stats['pathfinding']['current_node'] = self.desired_pos
+                        self.movement_stats['pathfinding']['path'] = None
                     else:
-                        self.follow_path()
+                        self.desired_pos = self.movement_stats['pathfinding']['path'][current_node_pos]
+                        self.movement_stats['pathfinding']['current_node'] = self.desired_pos
+                elif self.movement_stats['pathfinding']['goal_node'] != None:
+                    if current_node_pos == self.movement_stats['pathfinding']['goal_node']:
+                        self.movement_stats['pathfinding']['goal_node'] = None
+                        self.movement_stats['pathfinding']['current_node'] = None
+                        self.halt_tank_movement()
                 else:
                     self.desired_pos = None
                     self.halt_tank_movement()
@@ -2744,7 +3118,37 @@ class Artificial():
                 self.tank.chassis_direction['move'] = 'forward'
 
 
-    def path_generator(self):
+    # def path_generator(self):
+    #     vec2int = pathfinding_salvo_rework.vec2int
+    #     self.path_stats['path_initiated'] = True
+
+    #     next_node = vec2int(vec(self.path_info['closest_node_start'].center) + self.path_info['path'][self.path_info['closest_node_start'].center])
+    #     closest_start_dist = distance_between_positions(self.path_info['closest_node_start'].center, next_node)
+    #     current_pos_dist = distance_between_positions(self.tank.rotated_chassis_rect.center, next_node)
+    #     closest_start_v = vec(self.path_info['closest_node_start'].center)
+
+    #     if current_pos_dist <= closest_start_dist:
+    #         current = closest_start_v + self.path_info['path'][vec2int(closest_start_v)]
+    #         yield vec2int(current)
+    #     else:           
+    #         current = closest_start_v
+    #         yield self.path_info['closest_node_start'].center
+        
+    #     max_len = len(self.path_info['path'])
+             
+    #     for x in range(max_len + 1):
+    #         last_pos = vec2int(current)
+    #         if vec2int(current) not in self.path_info['path']:
+    #             break
+    #         current = current + self.path_info['path'][vec2int(current)]
+    #         yield last_pos
+
+    
+    def translate_astar_path(self):
+        '''
+        After the provision of an A-Star path, translates the vector coordinates into positional coordinates instead.
+        '''
+        new_path = {}
         vec2int = pathfinding_salvo_rework.vec2int
         self.path_stats['path_initiated'] = True
 
@@ -2755,21 +3159,36 @@ class Artificial():
 
         if current_pos_dist <= closest_start_dist:
             current = closest_start_v + self.path_info['path'][vec2int(closest_start_v)]
-            yield vec2int(current)
         else:           
             current = closest_start_v
-            yield self.path_info['closest_node_start'].center
+
+        new_path['start_node'] = vec2int(current)
+
         
         max_len = len(self.path_info['path'])
              
         for x in range(max_len + 1):
-            last_pos = vec2int(current)
             if vec2int(current) not in self.path_info['path']:
                 break
-            current = current + self.path_info['path'][vec2int(current)]
-            yield last_pos
-        
-            
+            next_node = current + self.path_info['path'][vec2int(current)]
+            new_path[vec2int(current)] = vec2int(next_node)
+            current = next_node
+
+        self.reset_astar_path_stats()
+
+        self.movement_stats['pathfinding']['path'] = new_path
+        return
+
+
+    def reset_astar_path_stats(self):
+        '''
+        Resets the variables related to A* Pathfinding following successful pathfinding.
+        '''
+        self.path_info = {'graph': None, 'path': None, 'start': None, 'goal': None, 'closest_node_start': None, 'closest_node_goal': None, 'tested_nodes': None}
+        self.path_stats = {'path_gen': None, 'path_followed': False, 'path_initiated': False}
+        return
+               
+                    
 
 
     def follow_path(self):
@@ -3363,9 +3782,14 @@ class Artificial():
                 if unit_x['nodes'][i] != None:
                     node_dist = distance_between_positions(unit_x['nodes'][i], self.tank.rotated_chassis_rect.center)
                     if node_dist < closest_node_dist:
-                        closest_node = unit_x['nodes'][i]
-                        closest_node_dist = node_dist
-            node_path = {'path': {self.tank.rotated_chassis_rect.center: closest_node}, 'goal_node': closest_node, 'valid_path': unit_x['node_stats'][closest_node]['target_sight'], 'distance': distance_between_positions(self.tank.rotated_chassis_rect.center, closest_node), 'fov_range': unit_x['node_stats'][closest_node]['fov_info']['fov_range'], 'fov_score': float('inf')}
+                        artificial_node_bounding = self.create_nodal_bounding_box(self.tank.rotated_chassis_rect.center, unit_x['nodes'][i], self.movement_stats['chassis_focus']['stats']['origin_dist'])
+                        node_bounding_clear = self.check_nodal_bounding_box_collisions(artificial_node_bounding)
+                        if node_bounding_clear == True:
+                            closest_node = unit_x['nodes'][i]
+                            closest_node_dist = node_dist
+            if closest_node == None:
+                continue
+            node_path = {'path': {'start_node': closest_node}, 'goal_node': closest_node, 'valid_path': unit_x['node_stats'][closest_node]['target_sight'], 'distance': distance_between_positions(self.tank.rotated_chassis_rect.center, closest_node), 'fov_range': unit_x['node_stats'][closest_node]['fov_info']['fov_range'], 'fov_score': float('inf')}
             if node_path['valid_path'] == True and node_path['fov_range'] > minimum_fov_range:
                 node_path['fov_score'] = distance_between_positions(self.tank.rotated_chassis_rect.center, closest_node) / unit_x['node_stats'][closest_node]['fov_info']['fov_range']
                 if unit_node_path['fov_score'] > node_path['fov_score']:
@@ -3388,6 +3812,11 @@ class Artificial():
                             path_exhausted = True
                             continue
                         chosen_path['path'][previous_node] = current_node
+                        current_previous_node_bounding = self.create_nodal_bounding_box(current_node, previous_node, self.movement_stats['chassis_focus']['stats']['origin_dist'])
+                        current_previous_node_bounding_clear = self.check_nodal_bounding_box_collisions(current_previous_node_bounding)
+                        if current_previous_node_bounding_clear == False:
+                            path_exhausted = True
+                            continue
                         chosen_path['distance'] += distance_between_positions(current_node, previous_node)
                         if unit_x['node_stats'][current_node]['target_sight'] == True and unit_x['node_stats'][current_node]['fov_info']['fov_range'] > minimum_fov_range:
                             chosen_path['valid_path'] = True
@@ -3688,17 +4117,18 @@ class Artificial():
                     path_results = self.provide_path_from_node_pool(path_start_node, path_goal_nodes, obscuring_units_path_points[omni_sighted_units[x]]['node_stats'])
                     if path_results != None:
                         valid_path_found = True
-                        path_results['path'][self.tank.rotated_chassis_rect.center] = path_start_node
+                        path_results['path']['start_node'] = path_start_node
                         artificial_path_identified = path_results['path']
                         drawing_path = True
                         current_node = self.tank.rotated_chassis_rect.center
+                        next_node = path_results['path']['start_node']
                         while drawing_path:
-                            next_node = path_results['path'][current_node]
                             pygame.draw.aaline(DISPSURF, (0, 255, 255), current_node, next_node, True)
                             if next_node not in path_results['path'] or next_node in path_goal_nodes:
                                 drawing_path = False
                                 continue
                             current_node = next_node
+                            next_node = path_results['path'][current_node]
 
             if valid_path_found == False:
                 pygame.draw.circle(DISPSURF, (86, 0, 255), goal_rect.center, 15, 2)
@@ -3781,11 +4211,10 @@ class Artificial():
                         artificial_to_goal_nodal_bridges['bridge_paths'].append(artificial_goal_obs_omni[x])
 
                 if len(artificial_to_goal_nodal_bridges['bridge_paths']) > 0:
-                    artificial_paths_identified = []
                     for x in range(len(artificial_to_goal_nodal_bridges['bridge_paths'])):
                         if False == True:#if artificial_path_identified != None:
                             break
-                        current_origin_point = self.tank.rotated_chassis_rect.center
+                        current_origin_point = 'start_node'
                         artificial_path_x = {'path': {}, 'nodes_visited': 0, 'valid': False}
                         current_obs_start_node = None
                         for i in range(len(artificial_to_goal_nodal_bridges['bridge_paths'][x])):
@@ -3819,7 +4248,7 @@ class Artificial():
                                     artificial_path_x['valid'] = True
                                     artificial_path_identified = artificial_path_x['path']
                                     current_node = self.tank.rotated_chassis_rect.center
-                                    next_node = artificial_path_x['path'][current_node]
+                                    next_node = artificial_path_x['path']['start_node']
                                     drawing_path = True
                                     while drawing_path:
                                         #pygame.draw.aaline(DISPSURF, (255, 0, 255), current_node, next_node, True)
@@ -3956,11 +4385,10 @@ class Artificial():
         
         obstacle_unit = bounding_collisions[0]
         obstacle_boundings = self.master_sector.units[obstacle_unit]['bounding_points']
-        artificial_obstacle_bounding_degs = [angle_between_points(obstacle_boundings[x], self.tank.rotated_chassis_rect.center) for x in range(len(obstacle_boundings))]
-        artificial_obstacle_bounding_dict = {artificial_obstacle_bounding_degs[x]:obstacle_boundings[x] for x in range(len(artificial_obstacle_bounding_degs))}
-        artificial_obstacle_center_deg = angle_between_points(self.master_sector.units[obstacle_unit]['unit_rect'].center, self.tank.rotated_chassis_rect.center)
-        obstacle_clockwise_diffs = [(artificial_obstacle_bounding_dict[artificial_obstacle_bounding_degs[x]], get_degree_diff(artificial_obstacle_center_deg, artificial_obstacle_bounding_degs[x])) for x in range(len(artificial_obstacle_bounding_degs)) if get_closest_degree_direction(artificial_obstacle_center_deg, artificial_obstacle_bounding_degs[x])[0] == 'clockwise']
-        obstacle_counterclock_diffs = [(artificial_obstacle_bounding_dict[artificial_obstacle_bounding_degs[x]], get_degree_diff(artificial_obstacle_center_deg, artificial_obstacle_bounding_degs[x])) for x in range(len(artificial_obstacle_bounding_degs)) if get_closest_degree_direction(artificial_obstacle_center_deg, artificial_obstacle_bounding_degs[x])[0] == 'counterclock']
+        artificial_obstacle_bounding_degs = [(obstacle_boundings[x], angle_between_points(self.tank.rotated_chassis_rect.center, obstacle_boundings[x])) for x in range(len(obstacle_boundings))]
+        artificial_obstacle_center_deg = angle_between_points(self.tank.rotated_chassis_rect.center, self.master_sector.units[obstacle_unit]['unit_rect'].center)
+        obstacle_clockwise_diffs = [(artificial_obstacle_bounding_degs[x][0], get_degree_diff(artificial_obstacle_center_deg, artificial_obstacle_bounding_degs[x][1])) for x in range(len(artificial_obstacle_bounding_degs)) if get_closest_degree_direction(artificial_obstacle_center_deg, artificial_obstacle_bounding_degs[x][1])[0] == 'clockwise']
+        obstacle_counterclock_diffs = [(artificial_obstacle_bounding_degs[x][0], get_degree_diff(artificial_obstacle_center_deg, artificial_obstacle_bounding_degs[x][1])) for x in range(len(artificial_obstacle_bounding_degs)) if get_closest_degree_direction(artificial_obstacle_center_deg, artificial_obstacle_bounding_degs[x][1])[0] == 'counterclock']
         max_clockwise_diff = max([abs(obstacle_clockwise_diffs[x][1]) for x in range(len(obstacle_clockwise_diffs))])
         max_counterclock_diff = max([abs(obstacle_counterclock_diffs[x][1]) for x in range(len(obstacle_counterclock_diffs))])
         max_clockwise_bounding = [obstacle_clockwise_diffs[x][0] for x in range(len(obstacle_clockwise_diffs)) if abs(obstacle_clockwise_diffs[x][1]) == max_clockwise_diff][0]
@@ -3971,6 +4399,7 @@ class Artificial():
         clock_counter_pos_list = [clockwise_offset_pos, counterclock_offset_pos]
         for x in range(len(clock_counter_pos_list)):
             pygame.draw.circle(DISPSURF, (255, 0, 0), clock_counter_pos_list[x], 10, 3)
+        
 
         artificial_clockwise_bounding_box = self.create_nodal_bounding_box(self.tank.rotated_chassis_rect.center, clockwise_offset_pos, self.movement_stats['chassis_focus']['stats']['origin_dist'])
         artificial_clockwise_bounding_clear = self.check_nodal_bounding_box_collisions(artificial_clockwise_bounding_box, [self.unit_id])
@@ -3978,8 +4407,8 @@ class Artificial():
             goal_clockwise_bounding_box = self.create_nodal_bounding_box(goal_pos, clockwise_offset_pos, self.movement_stats['chassis_focus']['stats']['origin_dist'])
             goal_clockwise_bounding_clear = self.check_nodal_bounding_box_collisions(goal_clockwise_bounding_box)
             if goal_clockwise_bounding_clear == True:
-                general_path = {self.tank.rotated_chassis_rect.center: clockwise_offset_pos, clockwise_offset_pos: goal_pos}
-                self.draw_path_dict(self.tank.rotated_chassis_rect.center, goal_pos, general_path)
+                general_path = {'start_node': clockwise_offset_pos, clockwise_offset_pos: goal_pos}
+                #self.draw_path_dict(self.tank.rotated_chassis_rect.center, goal_pos, general_path)
                 return general_path
         artificial_counterclock_bounding_box = self.create_nodal_bounding_box(self.tank.rotated_chassis_rect.center, counterclock_offset_pos, self.movement_stats['chassis_focus']['stats']['origin_dist'])
         artificial_counterclock_bounding_clear = self.check_nodal_bounding_box_collisions(artificial_counterclock_bounding_box, [self.unit_id])
@@ -3987,15 +4416,11 @@ class Artificial():
             goal_counterclock_bounding_box = self.create_nodal_bounding_box(goal_pos, counterclock_offset_pos, self.movement_stats['chassis_focus']['stats']['origin_dist'])
             goal_counterclock_bounding_clear = self.check_nodal_bounding_box_collisions(goal_counterclock_bounding_box, [self.unit_id])
             if goal_counterclock_bounding_clear == True:
-                general_path = {self.tank.rotated_chassis_rect.center: counterclock_offset_pos, counterclock_offset_pos: goal_pos}
-                self.draw_path_dict(self.tank.rotated_chassis_rect.center, goal_pos, general_path)
+                general_path = {'start_node': counterclock_offset_pos, counterclock_offset_pos: goal_pos}
+                #self.draw_path_dict(self.tank.rotated_chassis_rect.center, goal_pos, general_path)
                 return general_path
         return general_path
 
-
-        
-
-        
 
         
 
@@ -4016,41 +4441,86 @@ class Artificial():
         #will be a thematic constant through to the fnalization of this functionality, as it will be present at every solution.
         #Again, the solution to this problem is multi-faceted and layered: 1=>Generic chassis_focus/chassis_fov pathfinding corrections, which provide simple waypoints around obstructions; 2=>Obstruction Nodal Generation
         #3=>Legitimate Pathfinding:(
+        if self.movement_stats['pathfinding']['clearance'] == None:
+            return
+        
+        if self.desired_pos != None and self.movement_stats['pathfinding']['goal_node'] == None:
+            self.movement_stats['pathfinding']['goal_node'] = self.desired_pos
+            self.desired_pos = None
+
+        
+
         movement_start_time = pygame.time.get_ticks()
         chassis_focus = self.create_chassis_focus()
         chassis_fov = self.master_sector.create_fov_deltoid(self.tank.rotated_chassis_rect.center, self.tank.chassis_degree_val, self.movement_stats['chassis_fov']['stats']['range'], self.movement_stats['chassis_fov']['stats']['distance'])
         self.draw_chassis_fov(chassis_fov)
         self.movement_stats['chassis_focus'] = chassis_focus
         self.movement_stats['chassis_fov'] = chassis_fov
-        # fov_colliding_units_rect = self.check_chassis_fov_rect_collisions(chassis_fov)
-        # if len(fov_colliding_units_rect) >= 0:
-        #     if len(fov_colliding_units_rect) >= 0:
         fov_colliding_units_rect = self.check_chassis_focus_rect_collisions(chassis_focus)
-        if len(fov_colliding_units_rect) > 0:
-            if self.movement_stats['pathfinding']['goal_node'] == None:
-                return
-            general_pathfinding_bounding, general_pathfinding_bounding_clear = self.movement_check_goal_bounding(self.movement_stats['pathfinding']['goal_node'])
-            if general_pathfinding_bounding_clear == True:
-                return
-            general_pathfinding = self.general_goal_pathfinding(self.movement_stats['pathfinding']['goal_node'], general_pathfinding_bounding)
-            if general_pathfinding == None:
-                focus_colliding_units_omni = self.check_chassis_focus_bounding_collisions(chassis_focus, fov_colliding_units_rect)
-                if len(focus_colliding_units_omni) > 0:
-                    if self.movement_stats['pathfinding']['goal_node'] != None:
-                        goal_bounding_status = self.movement_check_goal_bounding(self.movement_stats['pathfinding']['goal_node'])
-                        if goal_bounding_status == True:
-                            return
-                        goal_rect = self.master_sector.create_rect_from_points([self.tank.rotated_chassis_rect.center, self.movement_stats['pathfinding']['goal_node']])
-                        goal_rect.width = max([goal_rect.width, goal_rect.height])
-                        goal_rect.height = goal_rect.width
-                        goal_rect = pygame.Rect(goal_rect.x - int(goal_rect.width / 2), goal_rect.y - int(goal_rect.height / 2), goal_rect.width * 2, goal_rect.height * 2)
-                        goal_sectors = self.master_sector.sector_point_collision_omni(goal_rect)
-                        goal_sectors_obstacles = list({self.master_sector.sectors[goal_sectors[x]].unit_list_omni[i] for x in range(len(goal_sectors)) for i in range(len(self.master_sector.sectors[goal_sectors[x]].unit_list_omni)) if self.master_sector.units[self.master_sector.sectors[goal_sectors[x]].unit_list_omni[i]]['unit_type'] == 'obstacle'})
-                        obscuring_units_path_points = self.determine_obstruction_movement_nodes(goal_sectors_obstacles, int(self.tank.node_distance * 0.65))
-                        nodal_movement_path = self.determine_nodal_movement_path(obscuring_units_path_points, goal_rect)
+        
+        if self.movement_stats['pathfinding']['clearance'] == 'TEMP_VAR': #0:
+            print('CLEARANCE ZERO')
+            if len(fov_colliding_units_rect) > 0:
+                if self.movement_stats['pathfinding']['goal_node'] == None:
+                    return
+                general_pathfinding_bounding, general_pathfinding_bounding_clear = self.movement_check_goal_bounding(self.movement_stats['pathfinding']['goal_node'])
+                if general_pathfinding_bounding_clear == True:
+                    return
+                general_pathfinding = self.general_goal_pathfinding(self.movement_stats['pathfinding']['goal_node'], general_pathfinding_bounding)
+                if general_pathfinding == None:
+                    self.movement_stats['pathfinding']['clearance'] = None
+                    self.master_sector.artificial_pathfinding_request(self.unit_id, 1)
+                else:
+                    self.movement_stats['pathfinding']['path'] = general_pathfinding
+                    return
+
+        elif self.movement_stats['pathfinding']['clearance'] == 'TEMP_VAR': #1:
+            print('CLEARANCE ONE')
+            focus_colliding_units_omni = self.check_chassis_focus_bounding_collisions(chassis_focus, fov_colliding_units_rect)
+            if len(focus_colliding_units_omni) > 0:
+                if self.movement_stats['pathfinding']['goal_node'] != None:
+                    goal_bounding_status = self.movement_check_goal_bounding(self.movement_stats['pathfinding']['goal_node'])
+                    if goal_bounding_status == True:
+                        return
+                    goal_rect = self.master_sector.create_rect_from_points([self.tank.rotated_chassis_rect.center, self.movement_stats['pathfinding']['goal_node']])
+                    goal_rect.width = max([goal_rect.width, goal_rect.height])
+                    goal_rect.height = goal_rect.width
+                    goal_rect = pygame.Rect(goal_rect.x - int(goal_rect.width / 2), goal_rect.y - int(goal_rect.height / 2), goal_rect.width * 2, goal_rect.height * 2)
+                    goal_sectors = self.master_sector.sector_point_collision_omni(goal_rect)
+                    goal_sectors_obstacles = list({self.master_sector.sectors[goal_sectors[x]].unit_list_omni[i] for x in range(len(goal_sectors)) for i in range(len(self.master_sector.sectors[goal_sectors[x]].unit_list_omni)) if self.master_sector.units[self.master_sector.sectors[goal_sectors[x]].unit_list_omni[i]]['unit_type'] == 'obstacle'})
+                    obscuring_units_path_points = self.determine_obstruction_movement_nodes(goal_sectors_obstacles, int(self.tank.node_distance * 0.65))
+                    nodal_movement_path = self.determine_nodal_movement_path(obscuring_units_path_points, goal_rect)
+                    if nodal_movement_path != None:
+                        self.movement_stats['pathfinding']['clearance'] = 0
+                        self.movement_stats['pathfinding']['path'] = nodal_movement_path
+                    else:
+                        self.movement_stats['pathfinding']['clearance'] = None
+                        self.master_sector.artificial_pathfinding_request(self.unit_id, 2)
+        
+        elif self.movement_stats['pathfinding']['clearance'] == 'TEMP_VAR': #2:
+            print('CLEARANCE TWO')
+            start_pos = self.tank.rotated_chassis_rect.center
+            self.desired_pos = start_pos
+            goal_pos = self.movement_stats['pathfinding']['goal_node']
+            area_rect = self.master_sector.create_rect_from_points([start_pos, goal_pos])
+            area_rect.width = max([area_rect.width, area_rect.height])
+            if area_rect.width < 750:
+                area_rect.width = 750
+            area_rect.height = area_rect.width
+            sectors_occupied = self.master_sector.sector_point_collision_omni(area_rect)
+            node_list_omni = []
+            [node_list_omni.extend(self.master_sector.sectors[sectors_occupied[x]].sector_nodes) for x in range(len(sectors_occupied))]
+            obstacle_rects = [self.master_sector.units[self.master_sector.sectors[sectors_occupied[x]].unit_list_omni[i]]['unit_rect'] for x in range(len(sectors_occupied)) for i in range(len(self.master_sector.sectors[sectors_occupied[x]].unit_list_omni)) if self.master_sector.sectors[sectors_occupied[x]].unit_list_omni[i] != self.unit_id]
+            self.path_info = pathfinding_salvo_rework.generate_foreign_path(node_list_omni, 100, obstacle_rects, start_pos, goal_pos)
+            print(self.path_info)
+            self.translate_astar_path()
+            self.movement_stats['pathfinding']['clearance'] = 0
+            return
+
+
                     
-        movement_end_time = pygame.time.get_ticks()
-        print('total time:{}'.format(movement_end_time - movement_start_time))
+        #movement_end_time = pygame.time.get_ticks()
+        #print('total time:{}'.format(movement_end_time - movement_start_time))
 
 
             
@@ -4062,8 +4532,20 @@ class Artificial():
             #calculations upon.
             #Must also make a determination regarding the TYPE of obstruction that is found. If an obstruction is, for example, an enemy unit rather than an obstacle, or an allied unit, behaviors to deal with such
             #occurences must be included.
-        
-                
+
+    
+    def get_next_path_node(self):
+        '''
+        Provides the following node from the path dictionary based upon the current node.
+        '''
+        pass
+
+
+    def follow_path(self):
+        '''
+        Provides the main path-following functionality, ensuring to check for obstructions in terms of either enemy or allied units.
+        '''
+        pass
 
 
     def draw_path(self):
@@ -4229,6 +4711,9 @@ def generate_obstacle(mouse_pos, obstacle_list, other_units):
 
 
 def angle_between_points(a, b):
+    '''
+    Provides the degree angle from b to a.
+    '''
     degree_radians = math.atan2(a[1] - b[1], a[0] - b[0])
     degree_val = math.degrees(degree_radians)
     return degree_val
@@ -4237,6 +4722,7 @@ def angle_between_points(a, b):
 def pos_from_degrees(pos_a, degree_val, dist):
         '''
         Determines a coordinate position given a starting position, a degree-value and a distance.
+        Returns a pygame vector object.
         '''
         velocity = pygame.math.Vector2(1, 0).rotate(degree_val) * dist
         pos_b = pos_a + velocity
@@ -4265,7 +4751,7 @@ def get_intersect(a1, a2, b1, b2):
 
 ############LIBERATED CODE FROM STACKOVERFLOW#############
 def is_on_line(a, b, c):
-    "Return true iff point c intersects the line segment from a to b."
+    "Return true if point c intersects the line segment from a to b."
     # (or the degenerate case that all 3 points are coincident)
     return (collinear(a, b, c)
             and (within(a.x, c.x, b.x) if a.x != b.x else 
@@ -4276,7 +4762,7 @@ def collinear(a, b, c):
     return (b.x - a.x) * (c.y - a.y) == (c.x - a.x) * (b.y - a.y)
 
 def within(p, q, r):
-    "Return true iff q is between p and r (inclusive)."
+    "Return true if q is between p and r (inclusive)."
     return p <= q <= r or r <= q <= p
 ##############END LIBERATION#############
 
@@ -4361,6 +4847,15 @@ def intersection_point_rect_collision(a, b, c):
     return False
 
 
+def normalize_degree(x):
+    '''
+    Receives a degree-value of any size and reduces it to an equivalent value equal to and below 180 degrees and above -180 degrees.
+    '''
+    if x > 180 or x <= -180:
+        return -180 * (((x // 180) % 2) * x/abs(x)) + (x % 180)
+    return x
+
+
 def is_degree_in_degree_range(degree_a, degree_b, degree_c):
     """
     Checkes whether a given degree-value lies between two bounding
@@ -4370,11 +4865,11 @@ def is_degree_in_degree_range(degree_a, degree_b, degree_c):
     Degree_c is the value being checked.
     """
     degrees_omni = [degree_a, degree_b, degree_c]
+
     for x in range(len(degrees_omni)):
-        if degrees_omni[x] > 180:
-            degrees_omni[x] -= 360
-        elif degrees_omni[x] <= -180:
-            degrees_omni[x] += 360
+        if degrees_omni[x] > 180 or degrees_omni[x] <= -180:
+            degrees_omni[x] = -180 * (((degrees_omni[x] // 180) % 2) * degrees_omni[x]/abs(degrees_omni[x])) + (degrees_omni[x] % 180)
+
     degree_a = degrees_omni[0]
     degree_b = degrees_omni[1]
     degree_c = degrees_omni[2]
@@ -4385,7 +4880,7 @@ def is_degree_in_degree_range(degree_a, degree_b, degree_c):
     if clockwise > counterclock:
         if degree_c <= clockwise and degree_c >= counterclock:
             return True
-    elif clockwise < counterclock and clockwise < 0 and counterclock > 0:
+    elif clockwise < counterclock and clockwise <= 0 and counterclock > 0:
         if degree_c >= counterclock or degree_c <= clockwise:
             return True
     return False
@@ -4592,6 +5087,36 @@ def circle_line_intersect(circle, point_a, point_b):
     
     return coll_a, coll_b
 
+def cross_product(p1, p2):
+    return (p1[0] * p2[1]) - (p2[0] * p1[1])
+
+def direction(p1, p2, p3):
+    return cross_product((p3[0] - p1[0], p3[1] - p1[1]), (p2[0] - p1[0], p2[1] - p1[1]))
+
+def on_segment(p1, p2, p):
+    return min(p1[0], p2[0]) <= p[0] <= max(p1[0], p2[0]) and min(p1[1], p2[1]) <= p[1] <= max(p1[1], p2[1])
+
+def line_segment_intersect_bool(p1, p2, p3, p4):
+    d1 = direction(p3, p4, p1)
+    d2 = direction(p3, p4, p2)
+    d3 = direction(p1, p2, p3)
+    d4 = direction(p1, p2, p4)
+
+    if ((d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0)) and \
+        ((d3 > 0 and d4 < 0) or (d3 < 0 and d4 > 0)):
+        return True
+
+    elif d1 == 0 and on_segment(p3, p4, p1):
+        return True
+    elif d2 == 0 and on_segment(p3, p4, p2):
+        return True
+    elif d3 == 0 and on_segment(p1, p2, p3):
+        return True
+    elif d4 == 0 and on_segment(p1, p2, p4):
+        return True
+    else:
+        return False
+
     
     
 
@@ -4732,6 +5257,7 @@ def main():
     e_turret_rotation_speed = 3
     e_chassis_direction = {'turn': None, 'move': None}
     e_chassis_pos = (600, 400)
+    #e_chassis_pos = (1500, 800)
     desired_pos = None
 
     enemy_tank_turret = turret_generator(base_turret, [standard_barrel, minigun_left, minigun_right])
@@ -4768,7 +5294,7 @@ def main():
 
     #Obstacle variables
     obs_omni = []
-    obs_positions = [((500, 75), 0), ((125, 360), -90.0), ((200, 120), 0), ((675, 325), 90), ((400, 250), 0)] #[((300, 250), 0), ((350, 100), 0)]
+    obs_positions = [] #[((500, 75), 0), ((125, 360), -90.0), ((200, 120), 0), ((675, 325), 90), ((400, 250), 0)] #[((300, 250), 0), ((350, 100), 0)]
     for x in range(len(obs_positions)):
         obs_x_dict = {'unit_type': 'obstacle', 'obstacle': pine_obs, 'pos': obs_positions[x][0], 'degree_val': obs_positions[x][1]}
         obs_x = master_sector.instantiate_unit(obs_x_dict)
@@ -4857,6 +5383,10 @@ def main():
                     artificial_enemy.desired_pos = start_pos
                     goal_pos = (mouse['mouse_x'], mouse['mouse_y'])
                     area_rect = master_sector.create_rect_from_points([start_pos, goal_pos])
+                    area_rect.width = max([area_rect.width, area_rect.height])
+                    if area_rect.width < 750:
+                        area_rect.width = 750
+                    area_rect.height = area_rect.width
                     sectors_occupied = master_sector.sector_point_collision_omni(area_rect)
                     node_list_omni = []
                     [node_list_omni.extend(master_sector.sectors[sectors_occupied[x]].sector_nodes) for x in range(len(sectors_occupied))]
@@ -4865,11 +5395,12 @@ def main():
                     time_start_clock = pygame.time.get_ticks()
 
                     artificial_enemy.path_info = pathfinding_salvo_rework.generate_foreign_path(node_list_omni, 100, obstacle_rects, start_pos, goal_pos)
+                    print(artificial_enemy.path_info)
                     artificial_enemy.path_stats = {'path_followed': False, 'path_gen': None, 'path_initiated': False}
 
                     time_stop_clock = pygame.time.get_ticks()
                     total_time = time_stop_clock - time_start_clock
-                    print(total_time)
+                    #print(f'time equals:{total_time}')
                 elif (event.key == K_u):
                     control_player = [[False, True][x] for x in range(len([False, True])) if [False, True][x] != control_player][0]
                 elif (event.key == K_g):
@@ -4877,6 +5408,8 @@ def main():
                         artificial_enemy.movement_stats['pathfinding']['goal_node'] = (mouse['mouse_x'], mouse['mouse_y'])
                     else:
                         artificial_enemy.movement_stats['pathfinding']['goal_node'] = None
+                elif (event.key == K_t):
+                    time.sleep(5)
             elif event.type == KEYUP:
                 if (event.key == K_LEFT or event.key == K_a):
                     if chassis_direction['turn'] == 'counterclock':
@@ -4924,6 +5457,9 @@ def main():
 
         if artificial_enemy.path_info['path'] != None:
             artificial_enemy.draw_path()
+
+        master_sector.master_sector_operations()
+        print(master_sector.pathfinding_queue)
         
         master_sector.unit_objects[playerTank_id].generate_tank(DISPSURF)
 
@@ -4953,6 +5489,7 @@ def main():
         #         pygame.draw.aaline(DISPSURF, colors_obs[i], master_sector.units[obs_omni[x]]['bounding_points'][i], half_counter, True)
 
 
+
         #aux_enemies operations management
         for x in range(len(aux_enemies)):
             if aux_enemies[x] in master_sector.artificial_objects:
@@ -4973,9 +5510,9 @@ def main():
         for x in range(len(master_sector.sector_keys)):
             master_sector.sectors[master_sector.sector_keys[x]].draw_self(DISPSURF)
 
-        #for x in range(len(master_sector.sector_keys)):
-            #for i in range(len(master_sector.sectors[master_sector.sector_keys[x]].sector_nodes)):
-                #master_sector.sectors[master_sector.sector_keys[x]].sector_nodes[i].draw_self(DISPSURF)
+        # for x in range(len(master_sector.sector_keys)):
+        #     for i in range(len(master_sector.sectors[master_sector.sector_keys[x]].sector_nodes)):
+        #         master_sector.sectors[master_sector.sector_keys[x]].sector_nodes[i].draw_self(DISPSURF)
 
 
 
