@@ -4348,8 +4348,6 @@ class Artificial():
                                 current_obs_start_node = next_obs_bridge_node
                         else:
                             break
-        pygame.display.update()
-        time.sleep(10)
         
         return artificial_path_identified
 
