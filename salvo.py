@@ -649,9 +649,10 @@ class Tank():
         Receives a degree-value from the MasterSector if a collision is detected, then alters its orientation by the specified amount.
         '''
 
-        if self.prior_chassis_pos != self.rotated_chassis_rect.center or self.prior_chassis_degree_val != self.chassis_degree_val:
+        #if self.prior_chassis_pos != self.rotated_chassis_rect.center or self.prior_chassis_degree_val != self.chassis_degree_val:
+        if True == True: #TODO - Remove me
             degree_change = self.master_sector.reorient_unit_collisions_omni(self.unit_id)
-            if degree_change != 0.0:
+            if degree_change != 0.0 and True == False: #TODO - Remove True==False conditional
                 self.chassis_degree_val += degree_change
                 self.rotate_chassis()
                 self.get_chassis_turret_pos()
@@ -669,9 +670,10 @@ class Tank():
                 self.update_sprite('turret')
                 self.update_master_sector()
 
-        if self.prior_turret_pos != self.chassis_turret_pos or self.prior_turret_degree_val != self.degree_val:
+        #if self.prior_turret_pos != self.chassis_turret_pos or self.prior_turret_degree_val != self.degree_val:
+        if False == True: #TODO - Remove me
             degree_change = self.master_sector.reorient_turret_collisions_omni(self.unit_id)
-            if degree_change != 0.0:
+            if degree_change != 0.0 and True == False: #TODO - Remove True==False conditional
                 self.degree_val += degree_change
                 self.get_turret_tip_pos()
                 self.previous_degree_val = self.degree_val
@@ -741,7 +743,7 @@ class Tank():
 
         self.update_master_sector()
         self.check_unit_collision()
-        self.draw_self()
+        #self.draw_self()
         self.create_health_bar()
 
 
@@ -2232,9 +2234,34 @@ class MasterSector():
         box_a_collision_rejects = []
         box_a_points_alt_bounding_indexes = []
         for x in range(len(box_a_active_points)):
+            on_seg_flag = False
             box_b_center_point_x_deg = angle_between_points(box_a_active_points[x], box_b_center)
             normalized_b_x_deg = normalize_degree(box_b_center_point_x_deg - box_b_deg_val)
-            if normalized_b_x_deg < 0:
+            if normalized_b_x_deg < 0 :
+                if normalized_b_x_deg > -90:
+                    chosen_alter_index = 0
+                else:
+                    chosen_alter_index = 2
+            else:
+                if normalized_b_x_deg < 90:
+                    chosen_alter_index = 1
+                else:
+                    chosen_alter_index = 3
+            normalized_b_x_chosen_zero_diff = abs(normalized_b_x_deg - box_b_zero_degs[chosen_alter_index])
+            if normalized_b_x_chosen_zero_diff < 2.5:
+                box_b_chosen_zero_deg = normalize_degree(angle_between_points(box_b_points[chosen_alter_index], box_b_center) - box_b_deg_val)
+                on_seg_flag = True
+                if box_b_chosen_zero_deg < 0:
+                    if normalized_b_x_deg < box_b_chosen_zero_deg:
+                        box_a_points_alt_bounding_indexes.append({0: (2, 0), 2: (3, 2)}[chosen_alter_index]) #OG
+                    else:
+                        box_a_points_alt_bounding_indexes.append({0: (0, 1), 2: (2, 0)}[chosen_alter_index])
+                else:
+                    if normalized_b_x_deg < box_b_chosen_zero_deg:
+                        box_a_points_alt_bounding_indexes.append({1: (0, 1), 3: (1, 3)}[chosen_alter_index]) #OG
+                    else:
+                        box_a_points_alt_bounding_indexes.append({1: (1, 3), 3: (3, 2)}[chosen_alter_index])
+            elif normalized_b_x_deg < 0:
                 if normalized_b_x_deg < box_b_zero_degs[0]:
                     if normalized_b_x_deg > box_b_zero_degs[2]:
                         box_a_points_alt_bounding_indexes.append((2, 0))
@@ -2250,19 +2277,8 @@ class MasterSector():
                         box_a_points_alt_bounding_indexes.append((3, 2))
                 else:
                     box_a_points_alt_bounding_indexes.append((0, 1))
-            
-            if normalized_b_x_deg < 0 :
-                if normalized_b_x_deg > -90:
-                    chosen_alter_index = 0
-                else:
-                    chosen_alter_index = 2
-            else:
-                if normalized_b_x_deg < 90:
-                    chosen_alter_index = 1
-                else:
-                    chosen_alter_index = 3
 
-            on_seg_flag = False
+            
             if normalized_b_x_deg in box_b_zero_degs:
                 on_seg_flag = True
             if line_segment_intersect_bool(box_b_center, box_a_active_points[x], box_b_points[box_a_points_alt_bounding_indexes[x][0]], box_b_points[box_a_points_alt_bounding_indexes[x][1]], on_seg=on_seg_flag) == False:
@@ -2275,9 +2291,34 @@ class MasterSector():
         box_b_collision_rejects = []
         box_b_points_alt_bounding_indexes = []
         for x in range(len(box_b_active_points)):
+            on_seg_flag = False
             box_a_center_point_x_deg = angle_between_points(box_b_active_points[x], box_a_center)
             normalized_a_x_deg = normalize_degree(box_a_center_point_x_deg - box_a_deg_val)
-            if normalized_a_x_deg < 0:
+            if normalized_a_x_deg < 0 :
+                if normalized_a_x_deg > -90:
+                    chosen_alter_index = 0
+                else:
+                    chosen_alter_index = 2
+            else:
+                if normalized_a_x_deg < 90:
+                    chosen_alter_index = 1
+                else:
+                    chosen_alter_index = 3
+            normalized_a_x_chosen_zero_diff = abs(normalized_a_x_deg - box_a_zero_degs[chosen_alter_index])
+            if normalized_a_x_chosen_zero_diff < 2.5:
+                box_a_chosen_zero_deg = normalize_degree(angle_between_points(box_a_points[chosen_alter_index], box_a_center) - box_a_deg_val)
+                on_seg_flag = True
+                if box_a_chosen_zero_deg < 0:
+                    if normalized_a_x_deg < box_a_chosen_zero_deg:
+                        box_b_points_alt_bounding_indexes.append({0: (2, 0), 2: (3, 2)}[chosen_alter_index]) #OG
+                    else:
+                        box_b_points_alt_bounding_indexes.append({0: (0, 1), 2: (2, 0)}[chosen_alter_index])
+                else:
+                    if normalized_a_x_deg < box_a_chosen_zero_deg:
+                        box_b_points_alt_bounding_indexes.append({1: (0, 1), 3: (1, 3)}[chosen_alter_index]) #OG
+                    else:
+                        box_b_points_alt_bounding_indexes.append({1: (1, 3), 3: (3, 2)}[chosen_alter_index])
+            elif normalized_a_x_deg < 0:
                 if normalized_a_x_deg < box_a_zero_degs[0]:
                     if normalized_a_x_deg > box_a_zero_degs[2]:
                         box_b_points_alt_bounding_indexes.append((2, 0))
@@ -2294,22 +2335,10 @@ class MasterSector():
                 else:
                     box_b_points_alt_bounding_indexes.append((0, 1))
 
-            if normalized_a_x_deg < 0 :
-                if normalized_a_x_deg > -90:
-                    chosen_alter_index = 0
-                else:
-                    chosen_alter_index = 2
-            else:
-                if normalized_a_x_deg < 90:
-                    chosen_alter_index = 1
-                else:
-                    chosen_alter_index = 3
-
-            on_seg_flag = False
             if normalized_a_x_deg in box_a_zero_degs:
                 on_seg_flag = True
             if line_segment_intersect_bool(box_a_center, box_b_active_points[x], box_a_points[box_b_points_alt_bounding_indexes[x][0]], box_a_points[box_b_points_alt_bounding_indexes[x][1]], on_seg=on_seg_flag) == False:
-                box_b_point_collisions.append((box_a_points[chosen_alter_index], box_b_active_points[x]))
+                box_b_point_collisions.append((box_a_points[chosen_alter_index], box_b_active_points[x], x))
             else:
                 box_b_collision_rejects.append((box_a_points[chosen_alter_index], box_b_active_points[x]))
 
@@ -3269,6 +3298,7 @@ class Artificial():
             next_node = current + self.path_info['path'][vec2int(current)]
             new_path[vec2int(current)] = vec2int(next_node)
             current = next_node
+        new_path[vec2int(current)] = self.movement_stats['pathfinding']['goal_node']
 
         self.reset_astar_path_stats()
 
@@ -4583,7 +4613,7 @@ class Artificial():
                     else:
                         self.movement_stats['pathfinding']['clearance'] = None
                         self.master_sector.artificial_pathfinding_request(self.unit_id, 2)
-        
+                    
         elif self.movement_stats['pathfinding']['clearance'] == 2: #'TEMP_VAR': #2:
             start_pos = self.tank.rotated_chassis_rect.center
             goal_pos = self.movement_stats['pathfinding']['goal_node']
@@ -4670,8 +4700,10 @@ class Artificial():
         print(path_list)
         if len(path_list) <= 1:
             return
-        pygame.draw.polygon(DISPSURF, path_color, path_list, 2)
+        [pygame.draw.polygon(DISPSURF, path_color, [path_list[x], path_list[x + 1]], 2) for x in range(len(path_list) - 1)]
         [(pygame.draw.circle(DISPSURF, (0, 0, 0), path_list[x], 5), pygame.draw.circle(DISPSURF, node_color, path_list[x], 3)) for x in range(len(path_list))]
+        if self.movement_stats['pathfinding']['current_node'] == self.movement_stats['pathfinding']['path']['start_node']:
+            pygame.draw.polygon(DISPSURF, path_color, [self.tank.rotated_chassis_rect.center, self.movement_stats['pathfinding']['path']['start_node']], 3)
         
 
 
@@ -4684,7 +4716,7 @@ class Artificial():
         self.authorize_desired_pos()
         self.movement_operations()
         print(self.movement_stats)
-        self.draw_pathfinding_path()
+        self.draw_pathfinding_path() #TODO Remove me
         self.get_current_degree_val()
         self.turn_chassis_to_desired()
         self.move_chassis_to_goal()
@@ -5389,7 +5421,7 @@ def main():
         obs_omni.append(obs_x)
     
     buildings_omni = []
-    buildings_positions = [((500, 75), 0), ((125, 360), -90.0), ((200, 120), 0), ((675, 325), 90)] #[]
+    buildings_positions = [((500, 75), 0), ((125, 360), -90.0)] #((200, 120), 0), ((675, 325), 90)] #[]
     for x in range(len(buildings_positions)):
         building_x_dict = {'unit_type': 'obstacle', 'obstacle': building_obs, 'pos': buildings_positions[x][0], 'degree_val': buildings_positions[x][1]}
         building_x = master_sector.instantiate_unit(building_x_dict)
@@ -5514,7 +5546,7 @@ def main():
                     
         DISPSURF.fill(BGCOLOR)
 
-        # Creates a bounding-box from the playerTank['unit_rect'].center to the mouse, which then checks against all other encountered units for bounding-box-collisions.
+        #Creates a bounding-box from the playerTank['unit_rect'].center to the mouse, which then checks against all other encountered units for bounding-box-collisions.
         # temp_artificial_mouse_pos_bounding_stats = artificial_enemy.create_nodal_bounding_box(master_sector.units[playerTank_id]['unit_rect'].center, (mouse['mouse_x'], mouse['mouse_y']), artificial_enemy.movement_stats['chassis_focus']['stats']['origin_dist'])
         # temp_bounding_clear = artificial_enemy.check_nodal_bounding_box_collisions(temp_artificial_mouse_pos_bounding_stats)
 
