@@ -230,6 +230,7 @@ class SpecialNode(Node):
     def locate_neighbors(self, graph, obstacle_rects):
         list_of_nodes = graph.nodes_list_omni
         searching_complete = False
+        print(list_of_nodes)
         while searching_complete == False:
             for x in range(len(list_of_nodes)):
                 if self.node_rect.collidepoint(list_of_nodes[x].center) == True:
@@ -633,7 +634,7 @@ class PriorityQueue:
 
 
 def vec2int(v):
-    return (int(v.x), int(v.y))
+    return (int(v.x + 0.5), int(v.y + 0.5))
 
 def heuristic(a, b, node_distance):
     #cost_value = abs(a.x - b.x) ** 2 + abs(a.y - b.y) ** 2
@@ -717,8 +718,8 @@ def generate_foreign_path(node_list_omni, node_distance, obstacle_rects, start_p
     Start = SpecialNode((0, 255, 255), start_pos[0], start_pos[1], node_distance)
     Goal = SpecialNode((255, 0, 255), goal_pos[0], goal_pos[1], node_distance)
 
-    print(Start)
-    print(Goal)
+    print(Start.__dict__)
+    print(Goal.__dict__)
 
     graph, tested_nodes = generate_graph_and_map_foreign(obstacle_rects, node_list_omni, node_distance)
 
